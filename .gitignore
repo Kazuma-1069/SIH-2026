@@ -1,1 +1,18 @@
+# MATLAB/Simulink
+*.slx.autosave
+*.autosave
+*.asv
 
+# Python
+__pycache__/
+*.py[cod]
+
+# IDEs
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Results
+*.csv
