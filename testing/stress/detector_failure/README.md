@@ -1,1 +1,0 @@
-# Detector Failure Stress Tests

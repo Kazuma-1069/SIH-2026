@@ -1,1 +1,0 @@
-# Multiple Obstacles Stress Tests
