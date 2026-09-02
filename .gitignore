@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# YOLO model files
+models/yolo/*.pt
+models/yolo/*.onnx
+models/yolo/*.engine
+
+# Environment files
+.env
+
+# CARLA generated/cache files
+*.log
+
+# Project outputs
+outputs/logs/*
+outputs/screenshots/*
+outputs/paths/*
+outputs/reports/*
+outputs/reports/*
