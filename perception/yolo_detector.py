@@ -10,7 +10,7 @@ except ImportError:
 
 class YOLODetector(ObjectDetector):
     """
-    YOLO-based object detector.
+    YOLO-based object detector. 
 
     Input:
         OpenCV BGR image.
