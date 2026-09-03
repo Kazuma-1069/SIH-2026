@@ -49,6 +49,9 @@ class Planner:
         }
         """
 
+        if not isinstance(perception_data, dict):
+            raise TypeError("perception_data must be a dictionary")
+
         primary_objects = perception_data.get(
             "primary_objects", []
         )
@@ -84,6 +87,9 @@ class Planner:
             "obstacle_occupied_cells", 0
         )
 
+        if not isinstance(obstacle_cells, (int, float)):
+            obstacle_cells = 0
+
         # Select planning behavior.
         if hazards or obstacle_cells > 0:
             action = "SLOW_AND_REROUTE"
@@ -101,21 +107,33 @@ class Planner:
             raw_path = self.dijkstra.find_path(start, goal)
             algorithm = "DIJKSTRA"
 
+        # No planner could find a path.
+        if not raw_path:
+            return {
+                "action": "STOP",
+                "target_speed_mps": 0.0,
+                "algorithm": algorithm,
+                "hazard_count": len(hazards),
+                "waypoints": [],
+                "path_safe": False,
+                "safety_reason": "NO_PATH_FOUND",
+                "confidence_uncertainty": confidence,
+            }
+
         # Optimize the path.
-        optimized_path = self.optimizer.optimize(
-            raw_path
-        )
+        optimized_path = self.optimizer.optimize(raw_path)
 
         # Safety validation.
         safety_result = self.safety_checker.validate_path(
             optimized_path
         )
 
-        # If the path is unsafe, don't claim it is valid.
+        # If the path is unsafe, stop immediately.
         if not safety_result["safe"]:
             action = "STOP"
             target_speed = 0.0
 
+        # Final planning output.
         return {
             "action": action,
             "target_speed_mps": target_speed,
@@ -124,5 +142,5 @@ class Planner:
             "waypoints": optimized_path,
             "path_safe": safety_result["safe"],
             "safety_reason": safety_result["reason"],
-            "confidence_uncertainty": confidence
+            "confidence_uncertainty": confidence,
         }
