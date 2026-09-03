@@ -43,17 +43,21 @@ class Dashboard:
     ):
         """Draw M2 perception data."""
 
-        width = int(self._get(
-            perception_output,
-            "image_width",
-            640,
-        ))
+        width = int(
+            self._get(
+                perception_output,
+                "image_width",
+                640,
+            )
+        )
 
-        height = int(self._get(
-            perception_output,
-            "image_height",
-            480,
-        ))
+        height = int(
+            self._get(
+                perception_output,
+                "image_height",
+                480,
+            )
+        )
 
         frame_id = self._get(
             perception_output,
@@ -83,12 +87,18 @@ class Dashboard:
         # Draw detected objects
         for obj in objects:
 
-            bbox = self._get(obj, "bbox")
+            bbox = self._get(
+                obj,
+                "bbox",
+            )
 
             if bbox is None or len(bbox) != 4:
                 continue
 
-            x1, y1, x2, y2 = map(float, bbox)
+            x1, y1, x2, y2 = map(
+                float,
+                bbox,
+            )
 
             rectangle = Rectangle(
                 (x1, y1),
@@ -124,13 +134,22 @@ class Dashboard:
                 None,
             )
 
-            label = f"{class_name} | ID: {track_id}"
+            label = (
+                f"{class_name} | "
+                f"ID: {track_id}"
+            )
 
             if confidence is not None:
-                label += f" | Conf: {float(confidence):.2f}"
+                label += (
+                    f" | Conf: "
+                    f"{float(confidence):.2f}"
+                )
 
             if distance is not None:
-                label += f" | Dist: {float(distance):.2f} m"
+                label += (
+                    f" | Dist: "
+                    f"{float(distance):.2f} m"
+                )
 
             ax.text(
                 x1,
@@ -144,12 +163,18 @@ class Dashboard:
             )
 
         ax.set_title(
-            f"M2 Perception | Frame {frame_id} | "
+            f"M2 Perception | "
+            f"Frame {frame_id} | "
             f"Objects: {len(objects)}"
         )
 
-        ax.set_xlabel("Image X (pixels)")
-        ax.set_ylabel("Image Y (pixels)")
+        ax.set_xlabel(
+            "Image X (pixels)"
+        )
+
+        ax.set_ylabel(
+            "Image Y (pixels)"
+        )
 
     def _draw_planning(
         self,
@@ -207,16 +232,25 @@ class Dashboard:
 
             if isinstance(waypoint, dict):
 
-                if "x" in waypoint and "y" in waypoint:
+                if (
+                    "x" in waypoint
+                    and "y" in waypoint
+                ):
                     x = waypoint["x"]
                     y = waypoint["y"]
 
-                elif "X" in waypoint and "Y" in waypoint:
+                elif (
+                    "X" in waypoint
+                    and "Y" in waypoint
+                ):
                     x = waypoint["X"]
                     y = waypoint["Y"]
 
                 elif "position" in waypoint:
-                    position = waypoint["position"]
+
+                    position = waypoint[
+                        "position"
+                    ]
 
                     if len(position) < 2:
                         continue
@@ -228,6 +262,7 @@ class Dashboard:
                     continue
 
             else:
+
                 if len(waypoint) < 2:
                     continue
 
@@ -235,7 +270,10 @@ class Dashboard:
                 y = waypoint[1]
 
             points.append(
-                (float(x), float(y))
+                (
+                    float(x),
+                    float(y),
+                )
             )
 
         # Draw path
@@ -268,16 +306,24 @@ class Dashboard:
 
             ax.legend()
 
-        ax.set_title("M1 Planning")
+        ax.set_title(
+            "M1 Planning"
+        )
 
-        ax.set_xlabel("Map X")
-        ax.set_ylabel("Map Y")
+        ax.set_xlabel(
+            "Map X"
+        )
+
+        ax.set_ylabel(
+            "Map Y"
+        )
 
         ax.grid(True)
 
         status = (
             f"Action: {action}\n"
-            f"Target speed: {float(speed):.2f} m/s\n"
+            f"Target speed: "
+            f"{float(speed):.2f} m/s\n"
             f"Algorithm: {algorithm}\n"
             f"Hazards: {hazard_count}\n"
             f"Path safe: {path_safe}\n"
@@ -317,15 +363,19 @@ class Dashboard:
 
         # M2 side
         if perception_output is not None:
+
             self._draw_perception(
                 axes[0],
                 perception_output,
                 camera_frame,
             )
+
         else:
+
             axes[0].set_title(
                 "M2 Perception — No Data"
             )
+
             axes[0].text(
                 0.5,
                 0.5,
@@ -334,18 +384,23 @@ class Dashboard:
                 va="center",
                 transform=axes[0].transAxes,
             )
+
             axes[0].set_axis_off()
 
         # M1 side
         if planning_output is not None:
+
             self._draw_planning(
                 axes[1],
                 planning_output,
             )
+
         else:
+
             axes[1].set_title(
                 "M1 Planning — No Data"
             )
+
             axes[1].text(
                 0.5,
                 0.5,
@@ -354,6 +409,7 @@ class Dashboard:
                 va="center",
                 transform=axes[1].transAxes,
             )
+
             axes[1].set_axis_off()
 
         fig.suptitle(
@@ -372,6 +428,10 @@ class Dashboard:
 
         if show:
             plt.show()
+        else:
+            # Prevent figures from accumulating during
+            # the live CARLA processing loop.
+            plt.close(fig)
 
         return fig
 
