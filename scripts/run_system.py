@@ -1,2 +1,5 @@
-# run_system.py
+from integration.system_runner import main
 
+
+if __name__ == "__main__":
+    main()
