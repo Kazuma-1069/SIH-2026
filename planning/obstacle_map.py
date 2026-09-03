@@ -7,14 +7,19 @@ class ObstacleMap:
     """
 
     def __init__(self, width=20, height=20):
-        self.width = width
-        self.height = height
+    # Support both ObstacleMap(20, 20) and ObstacleMap((20, 20))
+     if isinstance(width, tuple):
+        width, height = width
+    
+     self.width = int(width)
+     self.height = int(height)
 
-        # 0 = free, 1 = obstacle
-        self.grid = [
-            [0 for _ in range(width)]
-            for _ in range(height)
-        ]
+    # 0 = free, 1 = obstacle
+     self.grid = [
+        [0 for _ in range(self.width)]
+        for _ in range(self.height)
+    ]
+    
 
     def clear(self):
         """Clear all obstacles from the grid."""
@@ -24,14 +29,29 @@ class ObstacleMap:
         ]
 
     def add_obstacle(self, x, y):
-        """Mark a grid cell as occupied."""
-        if 0 <= x < self.width and 0 <= y < self.height:
-            self.grid[y][x] = 1
+     """Mark a grid cell as occupied."""
+     if 0 <= x < self.width and 0 <= y < self.height:
+      self.grid[y][x] = 1
 
     def remove_obstacle(self, x, y):
-        """Mark a grid cell as free."""
-        if 0 <= x < self.width and 0 <= y < self.height:            
-            self.grid[y][x] = 0
+     """Mark a grid cell as free."""
+     if 0 <= x < self.width and 0 <= y < self.height:
+        self.grid[y][x] = 0
+            
+    def set_obstacle(self, x, y=None, occupied=True):
+     """Set or clear a grid cell as occupied or free.
+
+     sSupports both:
+        set_obstacle(x, y, occupied)
+        set_obstacle((x, y), occupied)
+     """
+     if isinstance(x, tuple):
+        x, y, occupied = x[0], x[1], y
+
+     if occupied:
+        self.add_obstacle(x, y)
+     else:
+        self.remove_obstacle(x, y)
 
     def is_occupied(self, x, y):
         """Return True if the cell contains an obstacle."""
