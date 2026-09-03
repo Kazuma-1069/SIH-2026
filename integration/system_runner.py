@@ -13,6 +13,7 @@ from perception.perception_pipeline import PerceptionPipeline
 from planning.planner import Planner
 
 from integration.pipeline import IntegrationPipeline
+from visualization.dashboard import Dashboard
 
 
 def create_system():
@@ -77,13 +78,19 @@ def create_system():
     planner = Planner()
 
     # --------------------------------------------------
-    # M2 -> M1
+    # M3 - VISUALIZATION
+    # --------------------------------------------------
+
+    dashboard = Dashboard()
+
+    # --------------------------------------------------
+    # M2 -> M1 -> M3
     # --------------------------------------------------
 
     pipeline = IntegrationPipeline(
         perception_pipeline=perception,
         planner=planner,
-        dashboard=None,
+        dashboard=dashboard,
     )
 
     return (
@@ -117,7 +124,7 @@ def main():
         print("M4 CARLA       : READY")
         print("M2 Perception  : READY")
         print("M1 Planning    : READY")
-        print("M3 Integration : READY")
+        print("M3 Visualization : READY")
         print()
         print("Waiting for camera frames...")
         print("Press Q in the camera window to stop.")
@@ -135,7 +142,8 @@ def main():
                 time.sleep(0.05)
                 continue
 
-            # Process each new CARLA frame once.
+            # Get sensor metadata so each CARLA frame
+            # is processed only once.
             sensor_data = sensor_manager.get_latest_data(
                 "rgb_camera"
             )
@@ -150,7 +158,7 @@ def main():
                 last_frame = frame_id
 
             # --------------------------------------------------
-            # M4 -> M2 -> M1
+            # M4 -> M2 -> M1 -> M3
             # --------------------------------------------------
 
             perception_output, planning_output = (
@@ -215,7 +223,10 @@ def main():
                     cv2.LINE_AA,
                 )
 
+            # --------------------------------------------------
             # Planning information
+            # --------------------------------------------------
+
             cv2.putText(
                 display,
                 f"ACTION: {planning_output['action']}",
