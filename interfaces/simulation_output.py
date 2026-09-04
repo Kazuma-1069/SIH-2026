@@ -1,116 +1,192 @@
-"""
-Standardized output contract for the CARLA simulation module.
-
-M4 simulation
-    ↓
-SimulationOutput
-    ↓
-Integration layer
-    ↓
-M2 / M1 / M3
-"""
-
 from dataclasses import dataclass, field
-from typing import List, Optional
-import time
+from typing import Any, Dict, Optional
+
+
+@dataclass
+class Vector3:
+    """Three-dimensional vector."""
+
+    x: float
+    y: float
+    z: float
+
+
+@dataclass
+class TransformState:
+    """Vehicle position and orientation."""
+
+    location: Vector3
+    rotation: Vector3
 
 
 @dataclass
 class VehicleState:
     """Current state of the ego vehicle."""
 
-    vehicle_id: str
-
-    x: float
-    y: float
-    z: float
-
-    velocity_x: float
-    velocity_y: float
-    velocity_z: float
-
+    actor_id: int
+    type_id: str
+    transform: TransformState
+    velocity: Vector3
     speed_kmh: float
-
-    yaw: float
-    pitch: float
-    roll: float
 
 
 @dataclass
-class SensorFrame:
-    """Metadata describing a sensor frame."""
+class DestinationState:
+    """Final destination assigned to the vehicle."""
 
-    sensor_name: str
+    location: Vector3
+    distance_m: Optional[float] = None
+    reached: bool = False
 
-    frame_id: int
 
+@dataclass
+class SensorData:
+    """
+    Sensor data produced by CARLA.
+
+    data may contain:
+        RGB image
+        Depth image
+        LiDAR NumPy array
+        or another sensor representation.
+    """
+
+    name: str
+    frame: int
     timestamp: float
+    data: Any = None
+    width: Optional[int] = None
+    height: Optional[int] = None
 
 
 @dataclass
 class SimulationOutput:
     """
-    Standardized output produced by M4.
+    Standard M4 simulation output.
 
-    This contains simulation state and sensor-frame metadata.
-    Raw sensor data remains owned by SensorManager and is
-    passed through the integration pipeline when required.
+    Flow:
+
+        CARLA/M4
+            ↓
+        SimulationOutput
+            ↓
+        M2 Perception / M0 Integration
     """
 
-    timestamp: float = field(
-        default_factory=time.time
+    frame: int
+    timestamp: float
+
+    vehicle: VehicleState
+
+    destination: Optional[
+        DestinationState
+    ] = None
+
+    sensors: Dict[
+        str,
+        SensorData
+    ] = field(default_factory=dict)
+
+    scenario: Optional[str] = None
+
+    weather: Optional[Dict[str, Any]] = None
+
+    metadata: Dict[str, Any] = field(
+        default_factory=dict
     )
 
-    frame_id: int = 0
+    def add_sensor(
+        self,
+        sensor_data: SensorData,
+    ):
+        """Add or update sensor data."""
 
-    map_name: str = ""
+        self.sensors[
+            sensor_data.name
+        ] = sensor_data
 
-    vehicle: Optional[VehicleState] = None
+    def get_sensor(
+        self,
+        sensor_name: str,
+    ) -> Optional[SensorData]:
+        """Return a sensor packet by name."""
 
-    sensors: List[SensorFrame] = field(
-        default_factory=list
-    )
+        return self.sensors.get(
+            sensor_name
+        )
 
-    source: str = "CARLA"
+    def has_sensor(
+        self,
+        sensor_name: str,
+    ) -> bool:
+        """Check whether sensor data exists."""
+
+        return sensor_name in self.sensors
+
+    def destination_reached(self):
+        """Return whether the destination has been reached."""
+
+        if self.destination is None:
+            return False
+
+        return self.destination.reached
 
     def to_dict(self):
-        """Convert the simulation output into a dictionary."""
-
-        vehicle_data = None
-
-        if self.vehicle is not None:
-            vehicle_data = {
-                "vehicle_id": self.vehicle.vehicle_id,
-                "position": {
-                    "x": self.vehicle.x,
-                    "y": self.vehicle.y,
-                    "z": self.vehicle.z,
-                },
-                "velocity": {
-                    "x": self.vehicle.velocity_x,
-                    "y": self.vehicle.velocity_y,
-                    "z": self.vehicle.velocity_z,
-                },
-                "speed_kmh": self.vehicle.speed_kmh,
-                "rotation": {
-                    "yaw": self.vehicle.yaw,
-                    "pitch": self.vehicle.pitch,
-                    "roll": self.vehicle.roll,
-                },
-            }
+        """
+        Convert the simulation output into
+        a dictionary for logging/message passing.
+        """
 
         return {
+            "frame": self.frame,
             "timestamp": self.timestamp,
-            "frame_id": self.frame_id,
-            "map_name": self.map_name,
-            "vehicle": vehicle_data,
-            "sensors": [
+            "vehicle": {
+                "actor_id": self.vehicle.actor_id,
+                "type_id": self.vehicle.type_id,
+                "transform": {
+                    "location": {
+                        "x": self.vehicle.transform.location.x,
+                        "y": self.vehicle.transform.location.y,
+                        "z": self.vehicle.transform.location.z,
+                    },
+                    "rotation": {
+                        "x": self.vehicle.transform.rotation.x,
+                        "y": self.vehicle.transform.rotation.y,
+                        "z": self.vehicle.transform.rotation.z,
+                    },
+                },
+                "velocity": {
+                    "x": self.vehicle.velocity.x,
+                    "y": self.vehicle.velocity.y,
+                    "z": self.vehicle.velocity.z,
+                },
+                "speed_kmh": self.vehicle.speed_kmh,
+            },
+            "destination": (
                 {
-                    "sensor_name": sensor.sensor_name,
-                    "frame_id": sensor.frame_id,
-                    "timestamp": sensor.timestamp,
+                    "location": {
+                        "x": self.destination.location.x,
+                        "y": self.destination.location.y,
+                        "z": self.destination.location.z,
+                    },
+                    "distance_m": self.destination.distance_m,
+                    "reached": self.destination.reached,
                 }
-                for sensor in self.sensors
-            ],
-            "source": self.source,
+                if self.destination is not None
+                else None
+            ),
+            "sensors": {
+                name: {
+                    "name": packet.name,
+                    "frame": packet.frame,
+                    "timestamp": packet.timestamp,
+                    "data": packet.data,
+                    "width": packet.width,
+                    "height": packet.height,
+                }
+                for name, packet in self.sensors.items()
+            },
+            "scenario": self.scenario,
+            "weather": self.weather,
+            "metadata": self.metadata,
         }

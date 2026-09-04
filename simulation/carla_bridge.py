@@ -80,3 +80,4 @@ class CarlaBridge:
         self.world = None
 
         print("CARLA disconnected")
+                

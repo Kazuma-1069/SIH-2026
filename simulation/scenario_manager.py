@@ -1,183 +1,608 @@
+"""
+CARLA scenario management for SIH 2026.
+
+Supported scenarios:
+    - normal
+    - static_obstacle
+    - dynamic_obstacle
+    - pothole
+    - combined
+
+CARLA version:
+    0.9.16
+"""
+
+from __future__ import annotations
+
+import math
+import random
+from typing import Any, Dict, List, Optional
+
 import carla
 
 
 class ScenarioManager:
-    """Creates and manages simulation scenarios in CARLA."""
+    """
+    Creates and manages repeatable M4 simulation scenarios.
 
-    def __init__(self, world):
-        if world is None:
-            raise ValueError("A valid CARLA world is required.")
+    The manager is intentionally independent from M1/M2.
+    It exposes standardized hazard information for integration.
+    """
 
+    SUPPORTED_SCENARIOS = [
+        "normal",
+        "static_obstacle",
+        "dynamic_obstacle",
+        "pothole",
+        "combined",
+    ]
+
+    def __init__(
+        self,
+        world: carla.World,
+        vehicle: Optional[carla.Vehicle] = None,
+        seed: int = 42,
+    ):
         self.world = world
-        self.actors = []
+        self.vehicle = vehicle
+        self.random = random.Random(seed)
 
-    def set_weather(self, weather):
-        """Apply a CARLA weather configuration."""
+        self.active_scenario: str = "normal"
+        self.destination: Optional[carla.Location] = None
 
-        if weather is None:
-            raise ValueError("Weather cannot be None.")
+        self.hazards: List[Dict[str, Any]] = []
+        self.actors: List[carla.Actor] = []
 
-        self.world.set_weather(weather)
+        print("[M4] Scenario manager initialized")
 
-    def get_weather(self):
-        """Return the current weather configuration."""
+    # ============================================================
+    # SCENARIO API
+    # ============================================================
 
-        return self.world.get_weather()
-
-    def spawn_vehicle(
-        self,
-        vehicle_filter="vehicle.tesla.model3",
-        spawn_index=0,
-        autopilot=False,
-    ):
+    @classmethod
+    def list_scenarios(cls) -> List[str]:
         """
-        Spawn a vehicle for the current scenario.
+        Return all supported scenario names.
+        """
+        return list(cls.SUPPORTED_SCENARIOS)
 
-        Args:
-            vehicle_filter: CARLA vehicle blueprint filter.
-            spawn_index: Index of the map spawn point.
-            autopilot: Enable CARLA autopilot if True.
+    def set_scenario(self, scenario_name: str) -> bool:
+        """
+        Activate a scenario.
 
-        Returns:
-            Spawned CARLA vehicle actor.
+        Example:
+            manager.set_scenario("static_obstacle")
         """
 
+        scenario_name = str(scenario_name).strip().lower()
+
+        if scenario_name not in self.SUPPORTED_SCENARIOS:
+            raise ValueError(
+                f"Unsupported scenario '{scenario_name}'. "
+                f"Supported scenarios: {self.SUPPORTED_SCENARIOS}"
+            )
+
+        self.clear_scenario()
+
+        self.active_scenario = scenario_name
+
+        if scenario_name == "normal":
+            self._setup_normal()
+
+        elif scenario_name == "static_obstacle":
+            self._setup_static_obstacle()
+
+        elif scenario_name == "dynamic_obstacle":
+            self._setup_dynamic_obstacle()
+
+        elif scenario_name == "pothole":
+            self._setup_pothole()
+
+        elif scenario_name == "combined":
+            self._setup_combined()
+
+        print(f"[M4] Scenario active: {self.active_scenario}")
+        print(f"[M4] Hazards: {len(self.hazards)}")
+
+        return True
+
+    def get_active_scenario(self) -> str:
+        """
+        Return currently active scenario.
+        """
+        return self.active_scenario
+
+    def get_scenario_state(self) -> Dict[str, Any]:
+        """
+        Standardized scenario state for M0/M2/M1/M3/M6.
+        """
+        return {
+            "scenario": self.active_scenario,
+            "destination": self._location_to_dict(self.destination),
+            "hazards": self.get_hazards(),
+            "hazard_count": len(self.hazards),
+        }
+
+    def get_hazards(self) -> List[Dict[str, Any]]:
+        """
+        Return standardized hazard descriptions.
+        """
+        return [dict(hazard) for hazard in self.hazards]
+
+    def get_hazard_count(self) -> int:
+        return len(self.hazards)
+
+    def get_destination(self) -> Optional[carla.Location]:
+        return self.destination
+
+    def set_destination(self, destination: carla.Location) -> None:
+        """
+        Set the final destination.
+        """
+        self.destination = destination
+
+        print(
+            "Destination set: "
+            f"({destination.x:.2f}, "
+            f"{destination.y:.2f}, "
+            f"{destination.z:.2f})"
+        )
+
+    # ============================================================
+    # NORMAL
+    # ============================================================
+
+    def _setup_normal(self) -> None:
+        """
+        Empty road scenario.
+        """
+        self.hazards = []
+
+    # ============================================================
+    # STATIC OBSTACLE
+    # ============================================================
+
+    def _setup_static_obstacle(self) -> None:
+        """
+        Spawn a static vehicle/obstacle ahead of the ego vehicle.
+        """
+
+        if self.vehicle is None:
+            print("[M4] Warning: no ego vehicle supplied.")
+            return
+
+        ego_transform = self.vehicle.get_transform()
+
+        forward = ego_transform.get_forward_vector()
+
+        obstacle_location = ego_transform.location + carla.Location(
+            x=forward.x * 25.0,
+            y=forward.y * 25.0,
+            z=0.5,
+        )
+
+        # Find a nearby road waypoint so the obstacle is placed
+        # approximately on the drivable road surface.
+        try:
+            map_obj = self.world.get_map()
+            waypoint = map_obj.get_waypoint(
+                obstacle_location,
+                project_to_road=True,
+                lane_type=carla.LaneType.Driving,
+            )
+
+            if waypoint is not None:
+                obstacle_location = waypoint.transform.location
+                obstacle_location.z += 0.5
+
+        except Exception as exc:
+            print(f"[M4] Waypoint lookup warning: {exc}")
+
         blueprint_library = self.world.get_blueprint_library()
-        blueprints = blueprint_library.filter(vehicle_filter)
 
-        if not blueprints:
-            raise RuntimeError(
-                f"No vehicle blueprint found for: {vehicle_filter}"
-            )
+        vehicle_blueprints = blueprint_library.filter("vehicle.*")
 
-        spawn_points = self.world.get_map().get_spawn_points()
+        if not vehicle_blueprints:
+            print("[M4] No vehicle blueprint available.")
+            return
 
-        if not spawn_points:
-            raise RuntimeError("No spawn points available.")
+        blueprint = vehicle_blueprints[0]
 
-        if spawn_index < 0 or spawn_index >= len(spawn_points):
-            raise IndexError(
-                f"Invalid spawn index {spawn_index}. "
-                f"Available indices: 0-{len(spawn_points) - 1}"
-            )
+        try:
+            if blueprint.has_attribute("color"):
+                blueprint.set_attribute("color", "255,0,0")
+        except Exception:
+            pass
 
-        vehicle = self.world.try_spawn_actor(
-            blueprints[0],
-            spawn_points[spawn_index],
+        obstacle_transform = carla.Transform(
+            obstacle_location,
+            ego_transform.rotation,
         )
 
-        if vehicle is None:
-            raise RuntimeError(
-                f"Failed to spawn vehicle at spawn point "
-                f"{spawn_index}."
+        obstacle = self.world.try_spawn_actor(
+            blueprint,
+            obstacle_transform,
+        )
+
+        if obstacle is None:
+            print("[M4] Static obstacle spawn failed.")
+            return
+
+        self.actors.append(obstacle)
+
+        self.hazards.append(
+            {
+                "id": obstacle.id,
+                "type": "static_obstacle",
+                "location": {
+                    "x": obstacle_location.x,
+                    "y": obstacle_location.y,
+                    "z": obstacle_location.z,
+                },
+                "distance_ahead": 25.0,
+                "lateral_offset": 0.0,
+                "severity": "high",
+                "dynamic": False,
+                "active": True,
+            }
+        )
+
+        print("[M4] Static obstacle spawned.")
+        print(f"[M4] Obstacle ID: {obstacle.id}")
+        print("[M4] Distance ahead: 25.0 m")
+        print("[M4] Lateral offset: 0.0 m")
+
+    # ============================================================
+    # DYNAMIC OBSTACLE
+    # ============================================================
+
+    def _setup_dynamic_obstacle(self) -> None:
+        """
+        Spawn a vehicle ahead of the ego vehicle.
+
+        The obstacle is marked dynamic and can be updated every
+        simulation iteration using update_dynamic_obstacles().
+        """
+
+        if self.vehicle is None:
+            print("[M4] Warning: no ego vehicle supplied.")
+            return
+
+        ego_transform = self.vehicle.get_transform()
+        forward = ego_transform.get_forward_vector()
+
+        obstacle_location = ego_transform.location + carla.Location(
+            x=forward.x * 30.0,
+            y=forward.y * 30.0,
+            z=0.5,
+        )
+
+        try:
+            waypoint = self.world.get_map().get_waypoint(
+                obstacle_location,
+                project_to_road=True,
+                lane_type=carla.LaneType.Driving,
             )
 
-        if autopilot:
-            vehicle.set_autopilot(True)
+            if waypoint is not None:
+                obstacle_location = waypoint.transform.location
+                obstacle_location.z += 0.5
 
-        self.actors.append(vehicle)
+        except Exception as exc:
+            print(f"[M4] Waypoint lookup warning: {exc}")
 
-        return vehicle
+        blueprint_library = self.world.get_blueprint_library()
+        vehicle_blueprints = blueprint_library.filter("vehicle.*")
 
-    def spawn_walker(
-        self,
-        spawn_index=0,
-    ):
-        """Spawn a pedestrian in the current scenario."""
+        if not vehicle_blueprints:
+            print("[M4] No vehicle blueprint available.")
+            return
+
+        blueprint = vehicle_blueprints[0]
+
+        obstacle = self.world.try_spawn_actor(
+            blueprint,
+            carla.Transform(
+                obstacle_location,
+                ego_transform.rotation,
+            ),
+        )
+
+        if obstacle is None:
+            print("[M4] Dynamic obstacle spawn failed.")
+            return
+
+        self.actors.append(obstacle)
+
+        self.hazards.append(
+            {
+                "id": obstacle.id,
+                "type": "dynamic_obstacle",
+                "location": {
+                    "x": obstacle_location.x,
+                    "y": obstacle_location.y,
+                    "z": obstacle_location.z,
+                },
+                "distance_ahead": 30.0,
+                "lateral_offset": 0.0,
+                "severity": "high",
+                "dynamic": True,
+                "speed": 4.0,
+                "active": True,
+            }
+        )
+
+        print("[M4] Dynamic obstacle spawned.")
+        print(f"[M4] Obstacle ID: {obstacle.id}")
+        print("[M4] Distance ahead: 30.0 m")
+
+    def update_dynamic_obstacles(self, delta_seconds: float = 0.05) -> None:
+        """
+        Move dynamic hazards.
+
+        Called by the simulation loop.
+        """
+
+        for hazard in self.hazards:
+            if hazard.get("type") != "dynamic_obstacle":
+                continue
+
+            actor_id = hazard.get("id")
+            actor = self._find_actor(actor_id)
+
+            if actor is None:
+                hazard["active"] = False
+                continue
+
+            speed = float(hazard.get("speed", 4.0))
+
+            transform = actor.get_transform()
+            forward = transform.get_forward_vector()
+
+            new_location = transform.location + carla.Location(
+                x=forward.x * speed * delta_seconds,
+                y=forward.y * speed * delta_seconds,
+                z=0.0,
+            )
+
+            actor.set_transform(
+                carla.Transform(
+                    new_location,
+                    transform.rotation,
+                )
+            )
+
+            hazard["location"] = {
+                "x": new_location.x,
+                "y": new_location.y,
+                "z": new_location.z,
+            }
+
+    # ============================================================
+    # POTHOLE
+    # ============================================================
+
+    def _setup_pothole(self) -> None:
+        """
+        Create a visual pothole hazard.
+
+        CARLA does not provide a universal built-in pothole actor,
+        so the pothole is represented as a low road-hazard object.
+        """
+
+        if self.vehicle is None:
+            print("[M4] Warning: no ego vehicle supplied.")
+            return
+
+        ego_transform = self.vehicle.get_transform()
+        forward = ego_transform.get_forward_vector()
+
+        pothole_location = ego_transform.location + carla.Location(
+            x=forward.x * 22.0,
+            y=forward.y * 22.0,
+            z=0.05,
+        )
+
+        try:
+            waypoint = self.world.get_map().get_waypoint(
+                pothole_location,
+                project_to_road=True,
+                lane_type=carla.LaneType.Driving,
+            )
+
+            if waypoint is not None:
+                pothole_location = waypoint.transform.location
+                pothole_location.z += 0.05
+
+        except Exception as exc:
+            print(f"[M4] Waypoint lookup warning: {exc}")
 
         blueprint_library = self.world.get_blueprint_library()
 
-        walker_blueprints = blueprint_library.filter(
-            "walker.pedestrian.*"
-        )
+        # Try a small static object for visual representation.
+        props = blueprint_library.filter("static.prop.*")
 
-        if not walker_blueprints:
-            raise RuntimeError("No pedestrian blueprints available.")
+        actor = None
 
-        spawn_points = self.world.get_map().get_spawn_points()
+        if props:
+            blueprint = props[0]
 
-        if not spawn_points:
-            raise RuntimeError("No spawn points available.")
-
-        if spawn_index < 0 or spawn_index >= len(spawn_points):
-            raise IndexError(
-                f"Invalid spawn index {spawn_index}. "
-                f"Available indices: 0-{len(spawn_points) - 1}"
+            actor = self.world.try_spawn_actor(
+                blueprint,
+                carla.Transform(
+                    pothole_location,
+                    ego_transform.rotation,
+                ),
             )
 
-        transform = spawn_points[spawn_index]
+        hazard_id = actor.id if actor is not None else None
 
-        walker = self.world.try_spawn_actor(
-            walker_blueprints[0],
-            transform,
+        if actor is not None:
+            self.actors.append(actor)
+
+        self.hazards.append(
+            {
+                "id": hazard_id,
+                "type": "pothole",
+                "location": {
+                    "x": pothole_location.x,
+                    "y": pothole_location.y,
+                    "z": pothole_location.z,
+                },
+                "distance_ahead": 22.0,
+                "lateral_offset": 0.0,
+                "width": 1.5,
+                "depth": 0.15,
+                "severity": "medium",
+                "dynamic": False,
+                "active": True,
+            }
         )
 
-        if walker is None:
-            raise RuntimeError("Failed to spawn pedestrian.")
+        print("[M4] Pothole hazard created.")
+        print("[M4] Distance ahead: 22.0 m")
 
-        self.actors.append(walker)
+    # ============================================================
+    # COMBINED
+    # ============================================================
 
-        return walker
+    def _setup_combined(self) -> None:
+        """
+        Combined multi-hazard scenario.
+        """
 
-    def get_actors(self):
-        """Return actors created by this scenario manager."""
+        self._setup_static_obstacle()
 
-        return list(self.actors)
+        # Add pothole hazard without clearing the existing obstacle.
+        self._add_pothole_hazard()
 
-    def clear_scenario(self):
-        """Destroy all actors created by this scenario."""
+        print("[M4] Combined scenario configured.")
 
-        for actor in self.actors:
-            if actor is not None:
-                try:
+    def _add_pothole_hazard(self) -> None:
+        """
+        Add an additional pothole to the combined scenario.
+        """
+
+        if self.vehicle is None:
+            return
+
+        ego_transform = self.vehicle.get_transform()
+        forward = ego_transform.get_forward_vector()
+
+        # Place pothole at a different distance from the static obstacle.
+        pothole_location = ego_transform.location + carla.Location(
+            x=forward.x * 15.0,
+            y=forward.y * 15.0,
+            z=0.05,
+        )
+
+        try:
+            waypoint = self.world.get_map().get_waypoint(
+                pothole_location,
+                project_to_road=True,
+                lane_type=carla.LaneType.Driving,
+            )
+
+            if waypoint is not None:
+                pothole_location = waypoint.transform.location
+                pothole_location.z += 0.05
+
+        except Exception:
+            pass
+
+        self.hazards.append(
+            {
+                "id": None,
+                "type": "pothole",
+                "location": {
+                    "x": pothole_location.x,
+                    "y": pothole_location.y,
+                    "z": pothole_location.z,
+                },
+                "distance_ahead": 15.0,
+                "lateral_offset": 0.0,
+                "width": 1.5,
+                "depth": 0.15,
+                "severity": "medium",
+                "dynamic": False,
+                "active": True,
+            }
+        )
+
+        print("[M4] Additional pothole hazard added.")
+
+    # ============================================================
+    # CLEAR / DESTROY
+    # ============================================================
+
+    def clear_scenario(self) -> None:
+        """
+        Remove actors and reset hazards.
+        """
+
+        self._destroy_actors()
+
+        self.hazards = []
+        self.active_scenario = "normal"
+
+    def destroy(self) -> None:
+        """
+        Public cleanup method.
+        """
+
+        self.clear_scenario()
+        self.destination = None
+
+        print("[M4] Scenario manager destroyed.")
+
+    def _destroy_actors(self) -> None:
+        """
+        Safely destroy all actors created by this manager.
+        """
+
+        for actor in list(self.actors):
+            try:
+                if actor is not None and actor.is_alive:
                     actor.destroy()
-                except Exception:
-                    pass
+            except Exception as exc:
+                print(
+                    f"[M4] Warning: could not destroy scenario actor: {exc}"
+                )
 
         self.actors.clear()
 
-    def reset(self):
-        """Clear actors and reset the scenario state."""
+    # ============================================================
+    # HELPERS
+    # ============================================================
 
-        self.clear_scenario()
+    def _find_actor(self, actor_id: Optional[int]) -> Optional[carla.Actor]:
+        if actor_id is None:
+            return None
 
-    def create_basic_scenario(
-        self,
-        ego_vehicle_filter="vehicle.tesla.model3",
-        ego_spawn_index=0,
-        traffic_vehicle_count=0,
-    ):
-        """
-        Create a basic scenario with an ego vehicle and optional traffic.
+        try:
+            actor = self.world.get_actor(int(actor_id))
+            return actor
+        except Exception:
+            return None
 
-        Returns:
-            Dictionary containing the created actors.
-        """
-
-        self.clear_scenario()
-
-        ego_vehicle = self.spawn_vehicle(
-            vehicle_filter=ego_vehicle_filter,
-            spawn_index=ego_spawn_index,
-            autopilot=False,
-        )
-
-        traffic_vehicles = []
-
-        for index in range(traffic_vehicle_count):
-            try:
-                traffic_vehicle = self.spawn_vehicle(
-                    vehicle_filter="vehicle.*",
-                    spawn_index=ego_spawn_index + index + 1,
-                    autopilot=True,
-                )
-
-                traffic_vehicles.append(traffic_vehicle)
-
-            except (IndexError, RuntimeError):
-                break
+    @staticmethod
+    def _location_to_dict(
+        location: Optional[carla.Location],
+    ) -> Optional[Dict[str, float]]:
+        if location is None:
+            return None
 
         return {
-            "ego_vehicle": ego_vehicle,
-            "traffic_vehicles": traffic_vehicles,
+            "x": float(location.x),
+            "y": float(location.y),
+            "z": float(location.z),
         }
+
+
+# ================================================================
+# DIRECT TEST
+# ================================================================
+
+if __name__ == "__main__":
+    print("Supported scenarios:")
+    print(ScenarioManager.list_scenarios())

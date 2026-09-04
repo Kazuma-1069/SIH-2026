@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 
 from integration.data_adapter import perception_to_planning_input
 from integration.pipeline import IntegrationPipeline

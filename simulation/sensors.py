@@ -1,356 +1,511 @@
+"""
+SIH 2026 - CARLA Sensor Manager
+
+CARLA version:
+    0.9.16
+
+Managed sensors:
+    - RGB camera
+    - Depth camera
+    - LiDAR
+"""
+
+from __future__ import annotations
+
+import threading
+from typing import Any, Callable, Dict, Optional
+
 import carla
-import numpy as np
 
 
 class SensorManager:
-    """Manages CARLA sensors attached to the ego vehicle."""
+    """
+    Manages all virtual sensors attached to the ego vehicle.
 
-    def __init__(self, world, vehicle):
-        if world is None:
-            raise ValueError("A valid CARLA world is required.")
+    The manager keeps the sensor API simple for M4 and exposes the
+    latest sensor data for M2 perception.
+    """
 
-        if vehicle is None:
-            raise ValueError("A valid CARLA vehicle is required.")
-
+    def __init__(
+        self,
+        world: carla.World,
+        vehicle: carla.Vehicle,
+    ):
         self.world = world
         self.vehicle = vehicle
 
-        self.sensors = {}
-        self.latest_data = {}
+        self.blueprint_library = world.get_blueprint_library()
 
-    def _spawn_sensor(
-        self,
-        blueprint_id,
-        transform,
-        name,
-        attributes=None,
-    ):
-        """Create and attach a CARLA sensor to the ego vehicle."""
+        self.sensors: Dict[str, carla.Sensor] = {}
 
-        if name in self.sensors:
-            raise RuntimeError(
-                f"Sensor '{name}' already exists."
+        self.sensor_data: Dict[str, Any] = {
+            "rgb_camera": None,
+            "depth_camera": None,
+            "lidar": None,
+        }
+
+        self.sensor_frames: Dict[str, Optional[int]] = {
+            "rgb_camera": None,
+            "depth_camera": None,
+            "lidar": None,
+        }
+
+        self.sensor_status: Dict[str, bool] = {
+            "rgb_camera": False,
+            "depth_camera": False,
+            "lidar": False,
+        }
+
+        self.lock = threading.Lock()
+
+        self.callbacks: Dict[str, Optional[Callable]] = {
+            "rgb_camera": None,
+            "depth_camera": None,
+            "lidar": None,
+        }
+
+        print("[M4] SensorManager initialized")
+
+    # ============================================================
+    # TRANSFORM HELPERS
+    # ============================================================
+
+    @staticmethod
+    def _default_camera_transform() -> carla.Transform:
+        return carla.Transform(
+            carla.Location(
+                x=1.5,
+                y=0.0,
+                z=2.2,
+            ),
+            carla.Rotation(
+                pitch=-5.0,
+                yaw=0.0,
+                roll=0.0,
+            ),
+        )
+
+    @staticmethod
+    def _default_lidar_transform() -> carla.Transform:
+        return carla.Transform(
+            carla.Location(
+                x=0.0,
+                y=0.0,
+                z=2.5,
+            ),
+            carla.Rotation(
+                pitch=0.0,
+                yaw=0.0,
+                roll=0.0,
+            ),
+        )
+
+    # ============================================================
+    # CALLBACKS
+    # ============================================================
+
+    def _rgb_callback(self, image: carla.Image) -> None:
+        try:
+            raw = image.raw_data
+
+            import numpy as np
+
+            array = np.frombuffer(raw, dtype=np.uint8)
+
+            array = array.reshape(
+                (image.height, image.width, 4)
             )
 
-        blueprint_library = (
-            self.world.get_blueprint_library()
-        )
+            # CARLA camera data is BGRA.
+            rgb = array[:, :, :3][:, :, ::-1].copy()
 
-        blueprint = blueprint_library.find(
-            blueprint_id
-        )
+            with self.lock:
+                self.sensor_data["rgb_camera"] = rgb
+                self.sensor_frames["rgb_camera"] = image.frame
+                self.sensor_status["rgb_camera"] = True
 
-        if attributes:
-            for key, value in attributes.items():
-                blueprint.set_attribute(
-                    key,
-                    str(value),
-                )
+            callback = self.callbacks.get("rgb_camera")
 
-        sensor = self.world.spawn_actor(
-            blueprint,
-            transform,
-            attach_to=self.vehicle,
-        )
+            if callback is not None:
+                callback(rgb, image.frame)
 
-        self.sensors[name] = sensor
+        except Exception as exc:
+            print(f"[M4] RGB callback error: {exc}")
 
-        return sensor
+    def _depth_callback(self, image: carla.Image) -> None:
+        try:
+            import numpy as np
+
+            array = np.frombuffer(
+                image.raw_data,
+                dtype=np.uint8,
+            )
+
+            array = array.reshape(
+                (image.height, image.width, 4)
+            )
+
+            # CARLA depth encoding:
+            # R + G*256 + B*256^2
+            depth = (
+                array[:, :, 0].astype(np.float32)
+                + array[:, :, 1].astype(np.float32) * 256.0
+                + array[:, :, 2].astype(np.float32) * 65536.0
+            )
+
+            depth /= 16777215.0
+
+            # Convert normalized CARLA depth to meters.
+            depth *= 1000.0
+
+            with self.lock:
+                self.sensor_data["depth_camera"] = depth
+                self.sensor_frames["depth_camera"] = image.frame
+                self.sensor_status["depth_camera"] = True
+
+            callback = self.callbacks.get("depth_camera")
+
+            if callback is not None:
+                callback(depth, image.frame)
+
+        except Exception as exc:
+            print(f"[M4] Depth callback error: {exc}")
+
+    def _lidar_callback(self, point_cloud: carla.LidarMeasurement) -> None:
+        try:
+            import numpy as np
+
+            points = np.frombuffer(
+                point_cloud.raw_data,
+                dtype=np.float32,
+            )
+
+            points = points.reshape((-1, 4)).copy()
+
+            with self.lock:
+                self.sensor_data["lidar"] = points
+                self.sensor_frames["lidar"] = point_cloud.frame
+                self.sensor_status["lidar"] = True
+
+            callback = self.callbacks.get("lidar")
+
+            if callback is not None:
+                callback(points, point_cloud.frame)
+
+        except Exception as exc:
+            print(f"[M4] LiDAR callback error: {exc}")
+
+    # ============================================================
+    # RGB CAMERA
+    # ============================================================
 
     def spawn_rgb_camera(
         self,
-        name="rgb_camera",
-        width=1280,
-        height=720,
-        fov=90,
-        x=1.5,
-        y=0.0,
-        z=2.4,
-    ):
+        transform: Optional[carla.Transform] = None,
+        callback: Optional[Callable] = None,
+        image_size_x: int = 640,
+        image_size_y: int = 360,
+        fov: float = 90.0,
+        sensor_tick: float = 0.0,
+        **kwargs,
+    ) -> carla.Sensor:
         """
-        Spawn an RGB camera.
+        Spawn the RGB camera.
 
-        The callback converts CARLA BGRA data into
-        OpenCV-compatible BGR uint8 data.
+        Returns:
+            CARLA RGB camera sensor actor.
         """
 
-        transform = carla.Transform(
-            carla.Location(
-                x=x,
-                y=y,
-                z=z,
-            )
+        print("[M4] Spawning RGB camera...")
+
+        blueprint = self.blueprint_library.find(
+            "sensor.camera.rgb"
         )
 
-        camera = self._spawn_sensor(
-            "sensor.camera.rgb",
-            transform,
-            name,
-            {
-                "image_size_x": width,
-                "image_size_y": height,
-                "fov": fov,
-            },
+        blueprint.set_attribute(
+            "image_size_x",
+            str(image_size_x),
         )
 
-        camera.listen(
-            lambda image: self._process_camera(
-                image,
-                name,
-            )
+        blueprint.set_attribute(
+            "image_size_y",
+            str(image_size_y),
         )
+
+        blueprint.set_attribute(
+            "fov",
+            str(fov),
+        )
+
+        if sensor_tick > 0:
+            blueprint.set_attribute(
+                "sensor_tick",
+                str(sensor_tick),
+            )
+
+        camera_transform = (
+            transform
+            if transform is not None
+            else self._default_camera_transform()
+        )
+
+        self.callbacks["rgb_camera"] = callback
+
+        camera = self.world.spawn_actor(
+            blueprint,
+            camera_transform,
+            attach_to=self.vehicle,
+        )
+
+        self.sensors["rgb_camera"] = camera
+
+        camera.listen(self._rgb_callback)
+
+        print("[M4] RGB camera active")
 
         return camera
+
+    # ============================================================
+    # DEPTH CAMERA
+    # ============================================================
 
     def spawn_depth_camera(
         self,
-        name="depth_camera",
-        width=1280,
-        height=720,
-        fov=90,
-        x=1.5,
-        y=0.0,
-        z=2.4,
-    ):
-        """Spawn a CARLA depth camera."""
+        transform: Optional[carla.Transform] = None,
+        callback: Optional[Callable] = None,
+        image_size_x: int = 640,
+        image_size_y: int = 360,
+        fov: float = 90.0,
+        sensor_tick: float = 0.0,
+        **kwargs,
+    ) -> carla.Sensor:
+        """
+        Spawn the depth camera.
 
-        transform = carla.Transform(
-            carla.Location(
-                x=x,
-                y=y,
-                z=z,
+        Returns:
+            CARLA depth camera sensor actor.
+        """
+
+        print("[M4] Spawning depth camera...")
+
+        blueprint = self.blueprint_library.find(
+            "sensor.camera.depth"
+        )
+
+        blueprint.set_attribute(
+            "image_size_x",
+            str(image_size_x),
+        )
+
+        blueprint.set_attribute(
+            "image_size_y",
+            str(image_size_y),
+        )
+
+        blueprint.set_attribute(
+            "fov",
+            str(fov),
+        )
+
+        if sensor_tick > 0:
+            blueprint.set_attribute(
+                "sensor_tick",
+                str(sensor_tick),
             )
+
+        depth_transform = (
+            transform
+            if transform is not None
+            else self._default_camera_transform()
         )
 
-        camera = self._spawn_sensor(
-            "sensor.camera.depth",
-            transform,
-            name,
-            {
-                "image_size_x": width,
-                "image_size_y": height,
-                "fov": fov,
-            },
+        self.callbacks["depth_camera"] = callback
+
+        depth_camera = self.world.spawn_actor(
+            blueprint,
+            depth_transform,
+            attach_to=self.vehicle,
         )
 
-        camera.listen(
-            lambda image: self._process_depth(
-                image,
-                name,
-            )
-        )
+        self.sensors["depth_camera"] = depth_camera
 
-        return camera
+        depth_camera.listen(self._depth_callback)
+
+        print("[M4] Depth camera active")
+
+        return depth_camera
+
+    # ============================================================
+    # LIDAR
+    # ============================================================
 
     def spawn_lidar(
         self,
-        name="lidar",
-        channels=32,
-        range_m=50.0,
-        points_per_second=56000,
-        rotation_frequency=20,
-        upper_fov=10.0,
-        lower_fov=-30.0,
-        x=0.0,
-        y=0.0,
-        z=2.5,
-    ):
-        """Spawn a CARLA ray-cast LiDAR sensor."""
+        transform: Optional[carla.Transform] = None,
+        callback: Optional[Callable] = None,
+        channels: int = 16,
+        range: float = 50.0,
+        points_per_second: int = 56000,
+        rotation_frequency: float = 20.0,
+        upper_fov: float = 10.0,
+        lower_fov: float = -30.0,
+        sensor_tick: float = 0.0,
+        **kwargs,
+    ) -> carla.Sensor:
+        """
+        Spawn a LiDAR sensor.
 
-        transform = carla.Transform(
-            carla.Location(
-                x=x,
-                y=y,
-                z=z,
+        Returns:
+            CARLA LiDAR sensor actor.
+        """
+
+        print("[M4] Spawning LiDAR...")
+
+        blueprint = self.blueprint_library.find(
+            "sensor.lidar.ray_cast"
+        )
+
+        blueprint.set_attribute(
+            "channels",
+            str(channels),
+        )
+
+        blueprint.set_attribute(
+            "range",
+            str(range),
+        )
+
+        blueprint.set_attribute(
+            "points_per_second",
+            str(points_per_second),
+        )
+
+        blueprint.set_attribute(
+            "rotation_frequency",
+            str(rotation_frequency),
+        )
+
+        blueprint.set_attribute(
+            "upper_fov",
+            str(upper_fov),
+        )
+
+        blueprint.set_attribute(
+            "lower_fov",
+            str(lower_fov),
+        )
+
+        if sensor_tick > 0:
+            blueprint.set_attribute(
+                "sensor_tick",
+                str(sensor_tick),
             )
+
+        lidar_transform = (
+            transform
+            if transform is not None
+            else self._default_lidar_transform()
         )
 
-        lidar = self._spawn_sensor(
-            "sensor.lidar.ray_cast",
-            transform,
-            name,
-            {
-                "channels": channels,
-                "range": range_m,
-                "points_per_second": points_per_second,
-                "rotation_frequency": rotation_frequency,
-                "upper_fov": upper_fov,
-                "lower_fov": lower_fov,
-            },
+        self.callbacks["lidar"] = callback
+
+        lidar = self.world.spawn_actor(
+            blueprint,
+            lidar_transform,
+            attach_to=self.vehicle,
         )
 
-        lidar.listen(
-            lambda point_cloud: self._process_lidar(
-                point_cloud,
-                name,
-            )
-        )
+        self.sensors["lidar"] = lidar
+
+        lidar.listen(self._lidar_callback)
+
+        print("[M4] LiDAR active")
 
         return lidar
 
-    def _process_camera(self, image, name):
-        """
-        Convert a CARLA RGB image to an OpenCV-compatible
-        BGR NumPy array.
+    # ============================================================
+    # GENERIC SENSOR ACCESS
+    # ============================================================
 
-        Output:
-            shape = (height, width, 3)
-            dtype = uint8
-            format = BGR
-        """
+    def get_sensor(self, name: str) -> Optional[carla.Sensor]:
+        return self.sensors.get(name)
 
-        array = np.frombuffer(
-            image.raw_data,
-            dtype=np.uint8,
-        )
+    def get_sensor_data(self, name: str) -> Any:
+        with self.lock:
+            return self.sensor_data.get(name)
 
-        array = array.reshape(
-            (
-                image.height,
-                image.width,
-                4,
+    def get_latest_data(self) -> Dict[str, Any]:
+        with self.lock:
+            return dict(self.sensor_data)
+
+    def get_sensor_status(self) -> Dict[str, bool]:
+        with self.lock:
+            return dict(self.sensor_status)
+
+    def get_sensor_frames(self) -> Dict[str, Optional[int]]:
+        with self.lock:
+            return dict(self.sensor_frames)
+
+    def has_sensor_data(self, name: str) -> bool:
+        with self.lock:
+            return self.sensor_status.get(name, False)
+
+    def all_sensors_ready(self) -> bool:
+        with self.lock:
+            return all(
+                self.sensor_status.get(name, False)
+                for name in (
+                    "rgb_camera",
+                    "depth_camera",
+                    "lidar",
+                )
             )
-        )
 
-        # CARLA raw camera data is BGRA.
-        # Remove the alpha channel.
-        bgr = array[:, :, :3].copy()
+    # ============================================================
+    # SENSOR LIST
+    # ============================================================
 
-        self.latest_data[name] = {
-            "frame": image.frame,
-            "timestamp": image.timestamp,
-            "data": bgr,
-        }
+    def list_sensors(self) -> list[str]:
+        return list(self.sensors.keys())
 
-    def _process_depth(self, image, name):
+    def get_active_sensors(self) -> Dict[str, carla.Sensor]:
+        return dict(self.sensors)
+
+    # ============================================================
+    # STOP SENSOR
+    # ============================================================
+
+    def stop_sensor(self, name: str) -> bool:
+        sensor = self.sensors.get(name)
+
+        if sensor is None:
+            return False
+
+        try:
+            sensor.stop()
+        except Exception:
+            pass
+
+        with self.lock:
+            self.sensor_status[name] = False
+
+        return True
+
+    # ============================================================
+    # DESTROY / CLEANUP
+    # ============================================================
+
+    def destroy(self) -> None:
         """
-        Convert CARLA depth image into depth in metres.
+        Stop and destroy all sensors.
 
-        Output:
-            NumPy float32 array with shape:
-            (height, width)
-        """
-
-        array = np.frombuffer(
-            image.raw_data,
-            dtype=np.uint8,
-        )
-
-        array = array.reshape(
-            (
-                image.height,
-                image.width,
-                4,
-            )
-        )
-
-        depth = (
-            array[:, :, 2].astype(np.float32)
-            + array[:, :, 1].astype(np.float32) * 256.0
-            + array[:, :, 0].astype(np.float32)
-            * 256.0
-            * 256.0
-        )
-
-        depth /= (
-            256.0
-            * 256.0
-            * 256.0
-            - 1.0
-        )
-
-        # CARLA encodes depth up to 1000 metres.
-        depth *= 1000.0
-
-        self.latest_data[name] = {
-            "frame": image.frame,
-            "timestamp": image.timestamp,
-            "data": depth,
-        }
-
-    def _process_lidar(self, point_cloud, name):
-        """
-        Convert CARLA LiDAR data into a NumPy array.
-
-        Output:
-            shape = (N, 4)
-
-        Columns:
-            X, Y, Z, intensity
+        This method fixes the previous cleanup warning:
+            'SensorManager' object has no attribute 'destroy'
         """
 
-        points = np.frombuffer(
-            point_cloud.raw_data,
-            dtype=np.float32,
-        )
+        sensors = list(self.sensors.items())
 
-        points = points.reshape(
-            (-1, 4)
-        )
-
-        self.latest_data[name] = {
-            "frame": point_cloud.frame,
-            "timestamp": point_cloud.timestamp,
-            "data": points,
-        }
-
-    def get_latest_data(self, sensor_name):
-        """
-        Return complete latest sensor information.
-
-        Returns:
-            Dictionary containing:
-            frame, timestamp and data.
-        """
-
-        return self.latest_data.get(
-            sensor_name
-        )
-
-    def get_latest_frame(
-        self,
-        sensor_name="rgb_camera",
-    ):
-        """
-        Return only the latest sensor data array.
-
-        For the RGB camera this returns:
-            BGR uint8 image
-            shape = (height, width, 3)
-        """
-
-        sensor_data = self.latest_data.get(
-            sensor_name
-        )
-
-        if sensor_data is None:
-            return None
-
-        return sensor_data["data"]
-
-    def get_sensor(self, sensor_name):
-        """Return a spawned CARLA sensor actor."""
-
-        return self.sensors.get(
-            sensor_name
-        )
-
-    def get_sensor_names(self):
-        """Return names of all active sensors."""
-
-        return list(
-            self.sensors.keys()
-        )
-
-    def destroy_sensor(self, sensor_name):
-        """Destroy one managed sensor."""
-
-        sensor = self.sensors.pop(
-            sensor_name,
-            None,
-        )
-
-        if sensor is not None:
+        for name, sensor in sensors:
             try:
                 sensor.stop()
             except Exception:
@@ -361,21 +516,29 @@ class SensorManager:
             except Exception:
                 pass
 
-        self.latest_data.pop(
-            sensor_name,
-            None,
-        )
+            with self.lock:
+                self.sensor_status[name] = False
+                self.sensor_data[name] = None
+                self.sensor_frames[name] = None
 
-    def destroy_all(self):
-        """Destroy all managed sensors."""
+        self.sensors.clear()
 
-        for sensor_name in list(
-            self.sensors.keys()
-        ):
-            self.destroy_sensor(
-                sensor_name
-            )
+        print("All CARLA sensors destroyed.")
 
-        print(
-            "All CARLA sensors destroyed."
-        )
+    # Alias for compatibility with code that uses cleanup().
+    def cleanup(self) -> None:
+        self.destroy()
+
+    # Alias for compatibility with code that uses close().
+    def close(self) -> None:
+        self.destroy()
+
+    # ============================================================
+    # CONTEXT MANAGER
+    # ============================================================
+
+    def __enter__(self) -> "SensorManager":
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        self.destroy()

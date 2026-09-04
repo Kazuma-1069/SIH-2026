@@ -11,5 +11,5 @@ PLANNING_INPUT_SCHEMA = {
     },
     "confidence_uncertainty": {},
     "start": [0, 0],
-    "goal": [5, 5]
+    "goal": [10, 10]
 }
