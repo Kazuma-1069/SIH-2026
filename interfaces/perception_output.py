@@ -32,7 +32,7 @@ class PerceptionOutput:
     )
 
     frame_id: int = 0
-
+    
     image_width: int = 0
     image_height: int = 0
 

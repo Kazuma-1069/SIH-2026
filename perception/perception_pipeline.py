@@ -92,10 +92,10 @@ class PerceptionPipeline:
             )
 
         return PerceptionOutput(
-            timestamp=time.time(),
-            frame_id=self.frame_id,
-            image_width=width,
-            image_height=height,
-            objects=perception_objects,
-            source="CARLA_RGB_CAMERA",
-        )
+    timestamp=time.time(),
+    frame_id=self.frame_id,
+    image_width=width,
+    image_height=height,
+    objects=perception_objects,
+    source="CARLA_RGB_CAMERA",
+)

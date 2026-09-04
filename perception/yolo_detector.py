@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+
 from .detector import ObjectDetector
 
 try:
@@ -10,7 +11,7 @@ except ImportError:
 
 class YOLODetector(ObjectDetector):
     """
-    YOLO-based object detector. 
+    YOLO-based object detector.
 
     Input:
         OpenCV BGR image.
@@ -40,15 +41,11 @@ class YOLODetector(ObjectDetector):
         self.device = device
 
         self.model = YOLO(model_path)
-
         self.class_names = self.model.names
 
     def detect(self, frame):
         """
-        Detect objects in one OpenCV frame.
-
-        Args:
-            frame: numpy.ndarray in BGR format.
+        Detect objects in one OpenCV BGR frame.
 
         Returns:
             list[dict]
@@ -58,7 +55,9 @@ class YOLODetector(ObjectDetector):
             return []
 
         if not isinstance(frame, np.ndarray):
-            raise TypeError("frame must be a numpy.ndarray")
+            raise TypeError(
+                "frame must be a numpy.ndarray"
+            )
 
         if frame.size == 0:
             return []
@@ -81,13 +80,17 @@ class YOLODetector(ObjectDetector):
             return detections
 
         for box in result.boxes:
-
             xyxy = box.xyxy[0].cpu().numpy()
 
             x1, y1, x2, y2 = map(int, xyxy)
 
-            confidence = float(box.conf[0].cpu().item())
-            class_id = int(box.cls[0].cpu().item())
+            confidence = float(
+                box.conf[0].cpu().item()
+            )
+
+            class_id = int(
+                box.cls[0].cpu().item()
+            )
 
             class_name = self.class_names.get(
                 class_id,
