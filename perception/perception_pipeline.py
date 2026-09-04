@@ -1,5 +1,7 @@
 import time
 from perception.hazard_detector import HazardDetector
+from perception.drivable_space import DrivableSpaceDetector
+from perception.lidar_processor import LidarProcessor
 
 from interfaces.perception_output import (
     PerceptionObject,
@@ -27,14 +29,18 @@ class PerceptionPipeline:
         detector,
         tracker,
         depth_estimator=None,
+        lidar_processor=None,
     ):
         self.detector = detector
         self.tracker = tracker
         self.depth_estimator = depth_estimator
+        self.lidar_processor = lidar_processor
         self.hazard_detector = HazardDetector()
+        self.drivable_space_detector = DrivableSpaceDetector()
+        self.lidar_processor = lidar_processor or LidarProcessor()
         self.frame_id = 0
 
-    def process_frame(self, frame):
+    def process_frame(self, frame, lidar_points=None):
 
         if frame is None:
             raise ValueError(
@@ -54,6 +60,15 @@ class PerceptionPipeline:
         )
         hazards = self.hazard_detector.detect(
             detections
+        )
+        drivable_mask = self.drivable_space_detector.detect(
+            frame
+        )
+        road_edges = self.drivable_space_detector.get_road_edges(
+            drivable_mask
+        )
+        lidar_obstacles = self.lidar_processor.process(
+            lidar_points
         )
 
         # 3. Distance estimation
@@ -102,5 +117,8 @@ class PerceptionPipeline:
     image_height=height,
     objects=perception_objects,
     source="CARLA_RGB_CAMERA",
-    hazards=hazards
+    hazards=hazards,
+    drivable_mask=drivable_mask,
+    road_edges=road_edges,
+    lidar_obstacles=lidar_obstacles,
 )

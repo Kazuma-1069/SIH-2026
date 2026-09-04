@@ -99,3 +99,85 @@ def test_carla_perception():
     output = perception.process_latest_frame()
 
     assert output == "perception_output"
+
+from perception.hazard_detector import HazardDetector
+
+
+def test_hazard_detector():
+    detector = HazardDetector()
+
+    detections = [
+        {
+            "class_name": "pothole",
+            "confidence": 0.91,
+            "bbox": [100, 200, 300, 350],
+        },
+        {
+            "class_name": "car",
+            "confidence": 0.95,
+            "bbox": [400, 200, 600, 400],
+        },
+    ]
+
+    hazards = detector.detect(detections)
+
+    assert len(hazards) == 1
+    assert hazards[0].hazard_type == "pothole"
+    assert hazards[0].confidence == 0.91
+    assert hazards[0].bbox == [100, 200, 300, 350]
+
+from perception.drivable_space import DrivableSpaceDetector
+
+
+def test_drivable_space_detector():
+    detector = DrivableSpaceDetector()
+
+    frame = np.zeros(
+        (720, 1280, 3),
+        dtype=np.uint8,
+    )
+
+    mask = detector.detect(frame)
+
+    assert mask is not None
+    assert mask.shape == (720, 1280)
+    assert mask.dtype == np.uint8
+    assert np.all(mask[:396] == 0)
+    assert np.all(mask[396:] == 255)
+
+
+def test_road_edges():
+    detector = DrivableSpaceDetector()
+
+    frame = np.zeros(
+        (720, 1280, 3),
+        dtype=np.uint8,
+    )
+
+    mask = detector.detect(frame)
+    edges = detector.get_road_edges(mask)
+
+    assert len(edges) > 0
+    assert edges[0]["left"] == 0
+    assert edges[0]["right"] == 1279
+
+from perception.sensor_fusion import SensorFusion
+
+
+def test_sensor_fusion():
+
+    fusion = SensorFusion()
+
+    output = fusion.fuse(
+        objects=["car"],
+        hazards=["pothole"],
+        lidar_obstacles=["obstacle"],
+        road_edges=["edge"],
+        drivable_mask="mask",
+    )
+
+    assert output["objects"] == ["car"]
+    assert output["hazards"] == ["pothole"]
+    assert output["lidar_obstacles"] == ["obstacle"]
+    assert output["road_edges"] == ["edge"]
+    assert output["drivable_mask"] == "mask"

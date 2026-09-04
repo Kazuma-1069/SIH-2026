@@ -24,6 +24,7 @@ class PerceptionObject:
             (y1 + y2) / 2.0,
         ]
 
+
 @dataclass
 class RoadHazard:
     hazard_type: str
@@ -40,6 +41,7 @@ class RoadHazard:
             (y1 + y2) / 2.0,
         ]
 
+
 @dataclass
 class PerceptionOutput:
     timestamp: float = field(
@@ -47,7 +49,7 @@ class PerceptionOutput:
     )
 
     frame_id: int = 0
-    
+
     image_width: int = 0
     image_height: int = 0
 
@@ -56,6 +58,17 @@ class PerceptionOutput:
     )
 
     hazards: List[RoadHazard] = field(
+        default_factory=list
+    )
+
+    # M2 drivable-space output
+    drivable_mask: Optional[object] = None
+
+    # M2 road-edge output
+    road_edges: List[dict] = field(
+        default_factory=list
+    )
+    lidar_obstacles: List[dict] = field(
         default_factory=list
     )
 
@@ -69,6 +82,7 @@ class PerceptionOutput:
             "image_width": self.image_width,
             "image_height": self.image_height,
             "source": self.source,
+
             "objects": [
                 {
                     "track_id": obj.track_id,
@@ -81,6 +95,7 @@ class PerceptionOutput:
                 }
                 for obj in self.objects
             ],
+
             "hazards": [
                 {
                     "hazard_type": hazard.hazard_type,
@@ -91,4 +106,10 @@ class PerceptionOutput:
                 }
                 for hazard in self.hazards
             ],
+
+            "road_edges": self.road_edges,
+            "lidar_obstacles": self.lidar_obstacles,
+
+            # Avoid converting a large numpy mask into JSON here.
+            "has_drivable_mask": self.drivable_mask is not None,
         }
