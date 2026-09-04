@@ -181,3 +181,22 @@ def test_sensor_fusion():
     assert output["lidar_obstacles"] == ["obstacle"]
     assert output["road_edges"] == ["edge"]
     assert output["drivable_mask"] == "mask"
+
+from perception.trajectory_predictor import TrajectoryPredictor
+
+
+def test_trajectory_predictor():
+
+    predictor = TrajectoryPredictor()
+
+    class FakeObject:
+        track_id = 1
+        center = [100, 100]
+
+
+    output = predictor.update(
+        [FakeObject()]
+    )
+
+    assert len(output) == 1
+    assert output[0]["track_id"] == 1

@@ -63,6 +63,7 @@ class PerceptionOutput:
 
     # M2 drivable-space output
     drivable_mask: Optional[object] = None
+    environment: Optional[dict] = None
 
     # M2 road-edge output
     road_edges: List[dict] = field(

@@ -2,6 +2,7 @@ import time
 from perception.hazard_detector import HazardDetector
 from perception.drivable_space import DrivableSpaceDetector
 from perception.lidar_processor import LidarProcessor
+from perception.sensor_fusion import SensorFusion
 
 from interfaces.perception_output import (
     PerceptionObject,
@@ -38,6 +39,7 @@ class PerceptionPipeline:
         self.hazard_detector = HazardDetector()
         self.drivable_space_detector = DrivableSpaceDetector()
         self.lidar_processor = lidar_processor or LidarProcessor()
+        self.sensor_fusion = SensorFusion()
         self.frame_id = 0
 
     def process_frame(self, frame, lidar_points=None):
@@ -69,6 +71,13 @@ class PerceptionPipeline:
         )
         lidar_obstacles = self.lidar_processor.process(
             lidar_points
+        )
+        environment = self.sensor_fusion.fuse(
+            objects=tracked_objects,
+            hazards=hazards,
+            lidar_obstacles=lidar_obstacles,
+            road_edges=road_edges,
+            drivable_mask=drivable_mask
         )
 
         # 3. Distance estimation
@@ -121,4 +130,5 @@ class PerceptionPipeline:
     drivable_mask=drivable_mask,
     road_edges=road_edges,
     lidar_obstacles=lidar_obstacles,
+    environment=environment,
 )
