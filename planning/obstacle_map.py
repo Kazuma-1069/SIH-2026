@@ -59,6 +59,51 @@ class ObstacleMap:
             return True
 
         return self.grid[y][x] == 1
+    
+    def is_path_blocked(self, path):
+        """
+        Return True if any part of the path intersects
+        an occupied grid cell.
+
+        Consecutive path points are interpolated so that
+        obstacles between sparse waypoints are detected.
+        """
+        if not path:
+            return False
+
+        points = list(path)
+
+        # Check every path segment.
+        for start, end in zip(points, points[1:]):
+            x1, y1 = start
+            x2, y2 = end
+
+            dx = x2 - x1
+            dy = y2 - y1
+
+            steps = max(abs(dx), abs(dy))
+
+            if steps == 0:
+                if self.is_occupied(x1, y1):
+                    return True
+                continue
+
+            for i in range(steps + 1):
+                x = round(x1 + dx * i / steps)
+                y = round(y1 + dy * i / steps)
+
+                if self.is_occupied(x, y):
+                    return True
+
+        # Also check a one-point path.
+        if len(points) == 1:
+            return self.is_occupied(
+                points[0][0],
+                points[0][1]
+            )
+
+        return False
+    
 
     def update_from_objects(self, objects):
         """
