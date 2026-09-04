@@ -1,6 +1,6 @@
 import time
 import cv2
-
+from control.controller import VehicleController
 from simulation.carla_bridge import CarlaBridge
 from simulation.vehicle import VehicleManager
 from simulation.sensors import SensorManager
@@ -76,6 +76,13 @@ def create_system():
     # --------------------------------------------------
 
     planner = Planner()
+    # --------------------------------------------------
+    # M5 - VEHICLE CONTROL
+    # --------------------------------------------------
+
+    controller = VehicleController(
+    vehicle
+    )
 
     # --------------------------------------------------
     # M3 - VISUALIZATION
@@ -88,11 +95,12 @@ def create_system():
     # --------------------------------------------------
 
     pipeline = IntegrationPipeline(
-        perception_pipeline=perception,
-        planner=planner,
-        dashboard=dashboard,
-    )
-
+    perception_pipeline=perception,
+    planner=planner,
+    controller=controller,
+    dashboard=dashboard,
+    vehicle=vehicle,
+)
     return (
         bridge,
         vehicle_manager,
@@ -161,18 +169,21 @@ def main():
             # M4 -> M2 -> M1 -> M3
             # --------------------------------------------------
 
-            perception_output, planning_output = (
-                pipeline.process_frame(
-                    frame,
-                    show=False,
-                )
-            )
+            (
+    perception_output,
+    planning_output,
+    control_command,
+) = pipeline.process_frame(
+    frame,
+    show=False,
+)
 
             # --------------------------------------------------
             # Console status
             # --------------------------------------------------
 
             print(
+                f" | Control: {control_command}"
                 f"\rFrame: {perception_output.frame_id} | "
                 f"Objects: {len(perception_output.objects)} | "
                 f"Action: {planning_output['action']} | "

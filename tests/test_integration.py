@@ -1,4 +1,15 @@
+import sys
+import os
 
+sys.path.insert(
+    0,
+    os.path.abspath(
+        os.path.join(
+            os.path.dirname(__file__),
+            ".."
+        )
+    )
+)
 from integration.data_adapter import perception_to_planning_input
 from integration.pipeline import IntegrationPipeline
 from interfaces.perception_output import (
@@ -85,12 +96,11 @@ def test_integration_pipeline_m2_to_m1():
 
     frame = object()
 
-    perception_output, planning_output = pipeline.process_frame(
-        frame
-    )
-
+    perception_output, planning_output, control_command = pipeline.process_frame(
+    frame
+)
     assert isinstance(perception_output, PerceptionOutput)
-
+    assert control_command is None
     assert planning_output["action"] == "PROCEED_FORWARD"
     assert planning_output["algorithm"] == "A_STAR"
     assert planning_output["path_safe"] is True
