@@ -1,13 +1,14 @@
 """
 SIH-2026 Combined Visualization Dashboard.
 
-Combines:
+Displays:
     M2 Perception
     M1 Planning
-    Optional CARLA camera frame
+    M4 Simulation State
+    M5 Vehicle Control
 
 This module only visualizes data.
-It does not modify M1, M2, or M4 interfaces.
+It does not modify M1, M2, M4, or M5 interfaces.
 """
 
 from __future__ import annotations
@@ -19,14 +20,15 @@ from matplotlib.patches import Rectangle
 
 
 class Dashboard:
-    """Combined M1 + M2 visualization dashboard."""
+    """Combined autonomous driving visualization dashboard."""
 
-    def __init__(self, figsize=(14, 7)):
+    def __init__(self, figsize=(14, 10)):
         self.figsize = figsize
 
     @staticmethod
     def _get(data: Any, key: str, default=None):
-        """Read a value from either a dictionary or an object."""
+        """Read value from dictionary or object."""
+
         if data is None:
             return default
 
@@ -35,19 +37,23 @@ class Dashboard:
 
         return getattr(data, key, default)
 
+
+    # --------------------------------------------------
+    # M2 PERCEPTION
+    # --------------------------------------------------
+
     def _draw_perception(
         self,
         ax,
-        perception_output: Any,
-        camera_frame: Any = None,
+        perception_output,
+        camera_frame=None,
     ):
-        """Draw M2 perception data."""
 
         width = int(
             self._get(
                 perception_output,
                 "image_width",
-                640,
+                640
             )
         )
 
@@ -55,402 +61,506 @@ class Dashboard:
             self._get(
                 perception_output,
                 "image_height",
-                480,
+                480
             )
-        )
-
-        frame_id = self._get(
-            perception_output,
-            "frame_id",
-            0,
-        )
-
-        source = self._get(
-            perception_output,
-            "source",
-            "UNKNOWN",
         )
 
         objects = self._get(
             perception_output,
             "objects",
-            [],
+            []
         ) or []
 
-        # Camera image if available
+
         if camera_frame is not None:
             ax.imshow(camera_frame)
+
 
         ax.set_xlim(0, width)
         ax.set_ylim(height, 0)
 
-        # Draw detected objects
+
         for obj in objects:
 
             bbox = self._get(
                 obj,
                 "bbox",
+                None
             )
 
             if bbox is None or len(bbox) != 4:
                 continue
 
+
             x1, y1, x2, y2 = map(
                 float,
-                bbox,
+                bbox
             )
+
 
             rectangle = Rectangle(
                 (x1, y1),
-                x2 - x1,
-                y2 - y1,
+                x2-x1,
+                y2-y1,
                 fill=False,
-                linewidth=2,
+                linewidth=2
             )
 
             ax.add_patch(rectangle)
 
-            class_name = self._get(
-                obj,
-                "class_name",
-                "unknown",
+
+            label = (
+                f"{self._get(obj,'class_name','unknown')}"
             )
 
-            track_id = self._get(
-                obj,
-                "track_id",
-                "N/A",
-            )
 
             confidence = self._get(
                 obj,
                 "confidence",
-                None,
+                None
             )
+
 
             distance = self._get(
                 obj,
                 "distance",
-                None,
+                None
             )
 
-            label = (
-                f"{class_name} | "
-                f"ID: {track_id}"
-            )
 
             if confidence is not None:
                 label += (
-                    f" | Conf: "
-                    f"{float(confidence):.2f}"
+                    f"\nConf:{float(confidence):.2f}"
                 )
+
 
             if distance is not None:
                 label += (
-                    f" | Dist: "
-                    f"{float(distance):.2f} m"
+                    f"\nDist:{float(distance):.1f}m"
                 )
+
 
             ax.text(
                 x1,
-                max(0, y1 - 5),
+                y1,
                 label,
                 fontsize=8,
                 bbox=dict(
-                    boxstyle="round,pad=0.2",
-                    alpha=0.8,
-                ),
+                    boxstyle="round",
+                    alpha=0.7
+                )
             )
 
+
         ax.set_title(
-            f"M2 Perception | "
-            f"Frame {frame_id} | "
-            f"Objects: {len(objects)}"
+            f"M2 Perception\nObjects: {len(objects)}"
         )
 
-        ax.set_xlabel(
-            "Image X (pixels)"
-        )
 
-        ax.set_ylabel(
-            "Image Y (pixels)"
-        )
+    # --------------------------------------------------
+    # M1 PLANNING
+    # --------------------------------------------------
 
     def _draw_planning(
         self,
         ax,
-        planning_output: Any,
+        planning_output
     ):
-        """Draw M1 planning data."""
 
         waypoints = self._get(
             planning_output,
             "waypoints",
-            [],
+            []
         ) or []
 
-        action = self._get(
-            planning_output,
-            "action",
-            "UNKNOWN",
-        )
 
-        speed = self._get(
-            planning_output,
-            "target_speed_mps",
-            0.0,
-        )
-
-        algorithm = self._get(
-            planning_output,
-            "algorithm",
-            "UNKNOWN",
-        )
-
-        hazard_count = self._get(
-            planning_output,
-            "hazard_count",
-            0,
-        )
-
-        path_safe = self._get(
-            planning_output,
-            "path_safe",
-            False,
-        )
-
-        safety_reason = self._get(
-            planning_output,
-            "safety_reason",
-            "UNKNOWN",
-        )
-
-        # Convert waypoints into x/y values.
         points = []
 
-        for waypoint in waypoints:
 
-            if isinstance(waypoint, dict):
+        for wp in waypoints:
 
-                if (
-                    "x" in waypoint
-                    and "y" in waypoint
-                ):
-                    x = waypoint["x"]
-                    y = waypoint["y"]
+            if isinstance(wp, dict):
 
-                elif (
-                    "X" in waypoint
-                    and "Y" in waypoint
-                ):
-                    x = waypoint["X"]
-                    y = waypoint["Y"]
+                x = wp.get("x")
+                y = wp.get("y")
 
-                elif "position" in waypoint:
-
-                    position = waypoint[
-                        "position"
-                    ]
-
-                    if len(position) < 2:
-                        continue
-
-                    x = position[0]
-                    y = position[1]
-
-                else:
+                if x is None:
                     continue
 
             else:
 
-                if len(waypoint) < 2:
+                if len(wp) < 2:
                     continue
 
-                x = waypoint[0]
-                y = waypoint[1]
+                x = wp[0]
+                y = wp[1]
+
 
             points.append(
                 (
                     float(x),
-                    float(y),
+                    float(y)
                 )
             )
 
-        # Draw path
+
         if points:
 
-            xs = [p[0] for p in points]
-            ys = [p[1] for p in points]
+            xs = [
+                p[0]
+                for p in points
+            ]
+
+            ys = [
+                p[1]
+                for p in points
+            ]
+
 
             ax.plot(
                 xs,
                 ys,
                 marker="o",
                 linewidth=2,
-                label="Planned Path",
+                label="Path"
             )
+
 
             ax.scatter(
                 xs[0],
                 ys[0],
                 s=80,
-                label="Start",
+                label="Start"
             )
+
 
             ax.scatter(
                 xs[-1],
                 ys[-1],
                 s=80,
-                label="Goal",
+                label="Goal"
             )
 
+
             ax.legend()
+
+
+
+        safe = self._get(
+            planning_output,
+            "path_safe",
+            False
+        )
+
+
+        reason = self._get(
+            planning_output,
+            "safety_reason",
+            "NONE"
+        )
+
+
+        text = (
+            f"Path Safe: {safe}\n"
+            f"Safety: {reason}\n"
+            f"Hazards: "
+            f"{self._get(planning_output,'hazard_count',0)}"
+        )
+
+
+        ax.text(
+            0.02,
+            0.95,
+            text,
+            transform=ax.transAxes,
+            verticalalignment="top"
+        )
+
 
         ax.set_title(
             "M1 Planning"
         )
 
-        ax.set_xlabel(
-            "Map X"
-        )
-
-        ax.set_ylabel(
-            "Map Y"
-        )
-
         ax.grid(True)
 
-        status = (
-            f"Action: {action}\n"
-            f"Target speed: "
-            f"{float(speed):.2f} m/s\n"
-            f"Algorithm: {algorithm}\n"
-            f"Hazards: {hazard_count}\n"
-            f"Path safe: {path_safe}\n"
-            f"Safety: {safety_reason}"
+
+
+    # --------------------------------------------------
+    # M4 SIMULATION MAP
+    # --------------------------------------------------
+
+    def _draw_simulation(
+        self,
+        ax,
+        simulation_output
+    ):
+
+        position = self._get(
+            simulation_output,
+            "vehicle_position",
+            None
         )
 
-        ax.text(
-            0.02,
-            0.98,
-            status,
-            transform=ax.transAxes,
-            verticalalignment="top",
-            fontsize=9,
-            bbox=dict(
-                boxstyle="round",
-                alpha=0.8,
-            ),
+
+        destination = self._get(
+            simulation_output,
+            "destination",
+            None
         )
+
+
+        if position:
+
+            ax.scatter(
+                position[0],
+                position[1],
+                s=120,
+                label="Vehicle"
+            )
+
+
+        if destination:
+
+            ax.scatter(
+                destination[0],
+                destination[1],
+                s=120,
+                label="Destination"
+            )
+
+
+        ax.legend()
+
+
+        ax.set_title(
+            "M4 Simulation"
+        )
+
+        ax.set_xlabel("X")
+        ax.set_ylabel("Y")
+        ax.grid(True)
+
+
+
+    # --------------------------------------------------
+    # M5 CONTROL + TELEMETRY
+    # --------------------------------------------------
+
+    def _draw_vehicle_status(
+        self,
+        ax,
+        simulation_output,
+        control_output
+    ):
+
+        speed = self._get(
+            simulation_output,
+            "speed",
+            0
+        )
+
+
+        position = self._get(
+            simulation_output,
+            "vehicle_position",
+            "UNKNOWN"
+        )
+
+
+        throttle = self._get(
+            control_output,
+            "throttle",
+            0
+        )
+
+
+        brake = self._get(
+            control_output,
+            "brake",
+            0
+        )
+
+
+        steering = self._get(
+            control_output,
+            "steering",
+            0
+        )
+
+
+        risk = self._get(
+            simulation_output,
+            "risk_level",
+            "UNKNOWN"
+        )
+
+
+        text = (
+            "Vehicle Status\n\n"
+            f"Position: {position}\n"
+            f"Speed: {speed}\n\n"
+            f"Throttle: {throttle}\n"
+            f"Brake: {brake}\n"
+            f"Steering: {steering}\n\n"
+            f"Risk: {risk}"
+        )
+
+
+        ax.text(
+            0.05,
+            0.95,
+            text,
+            transform=ax.transAxes,
+            verticalalignment="top"
+        )
+
+
+        ax.set_title(
+            "M5 Control / Safety"
+        )
+
+
+        ax.axis("off")
+
+
+
+    # --------------------------------------------------
+    # MAIN RENDER
+    # --------------------------------------------------
 
     def render(
         self,
-        perception_output: Any = None,
-        planning_output: Any = None,
-        camera_frame: Any = None,
-        show: bool = True,
-        save_path: str | None = None,
+        simulation_output=None,
+        perception_output=None,
+        planning_output=None,
+        control_output=None,
+        camera_frame=None,
+        show=True,
+        save_path=None
     ):
-        """
-        Render the combined M1 + M2 dashboard.
-        """
+
 
         fig, axes = plt.subplots(
-            1,
             2,
-            figsize=self.figsize,
+            2,
+            figsize=self.figsize
         )
 
-        # M2 side
-        if perception_output is not None:
+
+        # M2
+
+        if perception_output:
 
             self._draw_perception(
-                axes[0],
+                axes[0,0],
                 perception_output,
-                camera_frame,
+                camera_frame
             )
+
 
         else:
 
-            axes[0].set_title(
-                "M2 Perception — No Data"
+            axes[0,0].set_title(
+                "M2 Perception Waiting"
             )
 
-            axes[0].text(
-                0.5,
-                0.5,
-                "Waiting for perception data...",
-                ha="center",
-                va="center",
-                transform=axes[0].transAxes,
-            )
 
-            axes[0].set_axis_off()
 
-        # M1 side
-        if planning_output is not None:
+        # M1
+
+        if planning_output:
 
             self._draw_planning(
-                axes[1],
-                planning_output,
+                axes[0,1],
+                planning_output
             )
+
 
         else:
 
-            axes[1].set_title(
-                "M1 Planning — No Data"
+            axes[0,1].set_title(
+                "M1 Planning Waiting"
             )
 
-            axes[1].text(
-                0.5,
-                0.5,
-                "Waiting for planning data...",
-                ha="center",
-                va="center",
-                transform=axes[1].transAxes,
+
+
+        # M4
+
+        if simulation_output:
+
+            self._draw_simulation(
+                axes[1,0],
+                simulation_output
             )
 
-            axes[1].set_axis_off()
+
+        else:
+
+            axes[1,0].set_title(
+                "M4 Simulation Waiting"
+            )
+
+
+
+        # M5
+
+        self._draw_vehicle_status(
+            axes[1,1],
+            simulation_output,
+            control_output
+        )
+
+
 
         fig.suptitle(
             "SIH-2026 Autonomous Driving Dashboard",
-            fontsize=16,
+            fontsize=16
         )
+
 
         fig.tight_layout()
 
+
         if save_path:
+
             fig.savefig(
                 save_path,
-                dpi=150,
-                bbox_inches="tight",
+                dpi=150
             )
 
+
         if show:
+
             plt.show()
+
         else:
-            # Prevent figures from accumulating during
-            # the live CARLA processing loop.
+
             plt.close(fig)
+
 
         return fig
 
 
+
 def create_dashboard(
-    perception_output: Any = None,
-    planning_output: Any = None,
-    camera_frame: Any = None,
-    show: bool = True,
-    save_path: str | None = None,
+    simulation_output=None,
+    perception_output=None,
+    planning_output=None,
+    control_output=None,
+    camera_frame=None,
+    show=True,
+    save_path=None
 ):
-    """Convenience function for creating the dashboard."""
 
     dashboard = Dashboard()
 
+
     return dashboard.render(
-        perception_output=perception_output,
-        planning_output=planning_output,
-        camera_frame=camera_frame,
-        show=show,
-        save_path=save_path,
+        simulation_output,
+        perception_output,
+        planning_output,
+        control_output,
+        camera_frame,
+        show,
+        save_path
     )
