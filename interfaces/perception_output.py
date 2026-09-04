@@ -24,6 +24,21 @@ class PerceptionObject:
             (y1 + y2) / 2.0,
         ]
 
+@dataclass
+class RoadHazard:
+    hazard_type: str
+    confidence: float
+    bbox: List[int]
+    distance: Optional[float] = None
+
+    @property
+    def center(self):
+        x1, y1, x2, y2 = self.bbox
+
+        return [
+            (x1 + x2) / 2.0,
+            (y1 + y2) / 2.0,
+        ]
 
 @dataclass
 class PerceptionOutput:
@@ -37,6 +52,10 @@ class PerceptionOutput:
     image_height: int = 0
 
     objects: List[PerceptionObject] = field(
+        default_factory=list
+    )
+
+    hazards: List[RoadHazard] = field(
         default_factory=list
     )
 
@@ -61,5 +80,15 @@ class PerceptionOutput:
                     "center": obj.center,
                 }
                 for obj in self.objects
+            ],
+            "hazards": [
+                {
+                    "hazard_type": hazard.hazard_type,
+                    "confidence": hazard.confidence,
+                    "bbox": hazard.bbox,
+                    "distance": hazard.distance,
+                    "center": hazard.center,
+                }
+                for hazard in self.hazards
             ],
         }

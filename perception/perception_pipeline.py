@@ -1,4 +1,5 @@
 import time
+from perception.hazard_detector import HazardDetector
 
 from interfaces.perception_output import (
     PerceptionObject,
@@ -30,7 +31,7 @@ class PerceptionPipeline:
         self.detector = detector
         self.tracker = tracker
         self.depth_estimator = depth_estimator
-
+        self.hazard_detector = HazardDetector()
         self.frame_id = 0
 
     def process_frame(self, frame):
@@ -49,6 +50,9 @@ class PerceptionPipeline:
 
         # 2. Tracking
         tracked_objects = self.tracker.update(
+            detections
+        )
+        hazards = self.hazard_detector.detect(
             detections
         )
 
@@ -98,4 +102,5 @@ class PerceptionPipeline:
     image_height=height,
     objects=perception_objects,
     source="CARLA_RGB_CAMERA",
+    hazards=hazards
 )
