@@ -66,6 +66,7 @@ class VehicleController:
         self,
         vehicle_location,
         target_point,
+        vehicle_heading=None,
     ):
 
         dx = (
@@ -81,17 +82,33 @@ class VehicleController:
         )
 
 
-        angle = math.atan2(
+        target_angle = math.atan2(
             dy,
             dx
         )
 
+        if vehicle_heading is None:
+            return 0.0
 
-        # Convert radians (-pi,+pi)
-        # into CARLA steering (-1,+1)
+        current_angle = math.radians(
+            vehicle_heading
+        )
 
+        heading_error = (
+            target_angle
+            -
+            current_angle
+        )
+
+        heading_error = (
+            heading_error
+            + math.pi
+        ) % (2 * math.pi) - math.pi
+
+        # A proportional heading correction gives M5
+        # smooth steering while retaining CARLA's range.
         steer = (
-            angle
+            heading_error
             /
             math.pi
         )
@@ -110,6 +127,7 @@ class VehicleController:
         self,
         planning_output,
         vehicle_location=None,
+        vehicle_heading=None,
     ):
 
 
@@ -151,8 +169,32 @@ class VehicleController:
 
         waypoints = planning_output.get(
             "waypoints",
-            []
+            None
         )
+
+        if (
+            not isinstance(waypoints, (list, tuple))
+            or not waypoints
+        ):
+
+            waypoints = None
+
+        if (
+            planning_output.get(
+                "bubble_emergency",
+                False
+            )
+            or planning_output.get(
+                "bubble_safe",
+                True
+            ) is False
+        ):
+
+            return {
+                "throttle": 0.0,
+                "steer": 0.0,
+                "brake": 1.0,
+            }
 
 
 
@@ -207,7 +249,7 @@ class VehicleController:
 
         if (
             vehicle_location is not None
-            and len(waypoints) > 0
+            and waypoints
         ):
 
 
@@ -258,6 +300,7 @@ class VehicleController:
                 self._calculate_steering(
                     vehicle_location,
                     target,
+                    vehicle_heading,
                 )
             )
 

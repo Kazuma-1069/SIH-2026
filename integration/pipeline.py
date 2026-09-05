@@ -26,6 +26,8 @@ from planning.coordinate_adapter import (
     CoordinateAdapter
 )
 
+import math
+
 
 class IntegrationPipeline:
 
@@ -65,6 +67,130 @@ class IntegrationPipeline:
             CoordinateAdapter()
         )
 
+        self.road_waypoints = None
+
+
+    def _build_road_route(
+        self,
+        start_location,
+    ):
+
+        if (
+            self.vehicle is None
+            or self.destination is None
+        ):
+
+            return []
+
+        world = getattr(
+            self.vehicle,
+            "world",
+            None
+        )
+
+        if world is None:
+            return []
+
+        carla_map = world.get_map()
+
+        start_waypoint = carla_map.get_waypoint(
+            start_location
+        )
+
+        destination_waypoint = carla_map.get_waypoint(
+            self.destination
+        )
+
+        if (
+            start_waypoint is None
+            or destination_waypoint is None
+        ):
+
+            return []
+
+        destination_location = (
+            destination_waypoint.transform.location
+        )
+
+        route = []
+        current_waypoint = start_waypoint
+        visited = set()
+
+        for _ in range(300):
+
+            current_location = (
+                current_waypoint.transform.location
+            )
+
+            route.append(
+                [
+                    current_location.x,
+                    current_location.y,
+                ]
+            )
+
+            distance_to_destination = math.sqrt(
+                (
+                    current_location.x
+                    - destination_location.x
+                ) ** 2
+                +
+                (
+                    current_location.y
+                    - destination_location.y
+                ) ** 2
+            )
+
+            if distance_to_destination <= 3.0:
+                break
+
+            waypoint_id = getattr(
+                current_waypoint,
+                "id",
+                id(current_waypoint),
+            )
+            visited.add(waypoint_id)
+
+            next_waypoints = current_waypoint.next(
+                2.0
+            )
+
+            if not next_waypoints:
+                break
+
+            unvisited = [
+                waypoint
+                for waypoint in next_waypoints
+                if getattr(
+                    waypoint,
+                    "id",
+                    id(waypoint),
+                ) not in visited
+            ]
+
+            candidates = (
+                unvisited
+                if unvisited
+                else next_waypoints
+            )
+
+            current_waypoint = min(
+                candidates,
+                key=lambda waypoint: (
+                    (
+                        waypoint.transform.location.x
+                        - destination_location.x
+                    ) ** 2
+                    +
+                    (
+                        waypoint.transform.location.y
+                        - destination_location.y
+                    ) ** 2
+                ),
+            )
+
+        return route
+
 
     def process_frame(
         self,
@@ -100,6 +226,8 @@ class IntegrationPipeline:
         # ==========================
 
         ego_position = None
+        vehicle_location = None
+        vehicle_heading = None
 
 
         if self.vehicle is not None:
@@ -109,6 +237,25 @@ class IntegrationPipeline:
             )
 
             if location is not None:
+
+                vehicle_location = [
+                    location.x,
+                    location.y,
+                ]
+
+                transform = self.vehicle.get_transform()
+
+                if transform is not None:
+                    vehicle_heading = (
+                        transform.rotation.yaw
+                    )
+
+                print(
+                    "CARLA VEHICLE LOCATION:",
+                    location.x,
+                    location.y,
+                    location.z,
+                )
 
                 ego_position = (
                     self.coordinate_adapter
@@ -123,6 +270,58 @@ class IntegrationPipeline:
                 planning_input[
                     "ego_position"
                 ] = ego_position
+
+                if self.road_waypoints is None:
+                    route = []
+
+                    if hasattr(
+                        self.vehicle,
+                        "generate_route",
+                    ) and self.destination is not None:
+                        route = (
+                            self.vehicle.generate_route(
+                                location,
+                                self.destination,
+                            )
+                        ) or []
+
+                    if not route:
+                        route = (
+                            self._build_road_route(
+                                location
+                            )
+                        )
+
+                    self.road_waypoints = [
+                        [
+                            point.x,
+                            point.y,
+                        ]
+                        if hasattr(point, "x")
+                        else list(point)
+                        for point in route
+                    ]
+
+                route = self.road_waypoints or []
+
+                print(
+                    "ACTIVE ROUTE WAYPOINTS:",
+                    len(route),
+                )
+
+                if self.road_waypoints:
+                    planning_input[
+                        "route_waypoints"
+                    ] = route
+
+                    planning_input[
+                        "current_path"
+                    ] = [
+                        self.coordinate_adapter
+                        .world_to_grid(
+                            point
+                        ) for point in route
+                    ]
 
 
 
@@ -169,6 +368,21 @@ class IntegrationPipeline:
                 planning_input
             )
         )
+
+        if (
+            self.road_waypoints
+            and planning_output.get(
+                "path_safe",
+                False
+            )
+            and planning_output.get(
+                "action"
+            ) != "STOP"
+        ):
+
+            planning_output[
+                "waypoints"
+            ] = self.road_waypoints
         print(
             "\n========== PLANNER DEBUG =========="
         )
@@ -226,7 +440,8 @@ class IntegrationPipeline:
                 self.controller
                 .compute_control(
                     planning_output,
-                    ego_position,
+                    vehicle_location,
+                    vehicle_heading,
                 )
             )
 

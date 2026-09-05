@@ -108,6 +108,28 @@ class ObstacleMap:
         )
 
 
+    def is_path_blocked(
+        self,
+        path
+    ):
+
+        # An empty path has no waypoint that can be blocked.
+        if not path:
+            return False
+
+        # Check each waypoint against the occupancy grid.
+        for x, y in path:
+
+            if self.is_occupied(
+                x,
+                y
+            ):
+
+                return True
+
+        return False
+
+
 
     # =====================================================
     # OBJECT UPDATES FROM PERCEPTION

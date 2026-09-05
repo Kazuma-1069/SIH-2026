@@ -224,6 +224,10 @@ class VehicleManager:
             selected_transform
         )
 
+        self.vehicle.set_simulate_physics(
+            True
+        )
+
         try:
             self.vehicle.set_autopilot(
                 False
@@ -380,6 +384,146 @@ class VehicleManager:
 
         return self.vehicle.get_transform()
 
+    def get_heading(self):
+        transform = self.get_transform()
+
+        if transform is None:
+            return None
+
+        return float(
+            transform.rotation.yaw
+        )
+
+    def get_next_waypoint(
+        self,
+        current_location,
+        route_waypoints,
+    ):
+        """Return the route waypoint closest to the current location."""
+
+        if not route_waypoints:
+            return None
+
+        def point_xy(point):
+            if hasattr(point, "transform"):
+                point = point.transform.location
+
+            if hasattr(point, "location"):
+                point = point.location
+
+            if hasattr(point, "x"):
+                return point.x, point.y
+
+            return point[0], point[1]
+
+        current_x, current_y = point_xy(
+            current_location
+        )
+
+        return min(
+            route_waypoints,
+            key=lambda waypoint: (
+                (
+                    point_xy(waypoint)[0]
+                    - current_x
+                ) ** 2
+                +
+                (
+                    point_xy(waypoint)[1]
+                    - current_y
+                ) ** 2
+            ),
+        )
+
+    def generate_route(
+        self,
+        start_location,
+        destination_location,
+    ):
+        """Generate a route by following CARLA road waypoints."""
+
+        carla_map = self.world.get_map()
+
+        current_waypoint = carla_map.get_waypoint(
+            start_location
+        )
+
+        destination_waypoint = carla_map.get_waypoint(
+            destination_location
+        )
+
+        if (
+            current_waypoint is None
+            or destination_waypoint is None
+        ):
+            return []
+
+        destination = (
+            destination_waypoint.transform.location
+        )
+        route = []
+        visited = set()
+
+        for _ in range(500):
+            location = current_waypoint.transform.location
+            route.append(location)
+
+            distance = math.sqrt(
+                (location.x - destination.x) ** 2
+                +
+                (location.y - destination.y) ** 2
+            )
+
+            if distance <= 3.0:
+                break
+
+            waypoint_id = getattr(
+                current_waypoint,
+                "id",
+                id(current_waypoint),
+            )
+            visited.add(waypoint_id)
+
+            next_waypoints = current_waypoint.next(
+                2.0
+            )
+
+            if not next_waypoints:
+                break
+
+            unvisited = [
+                waypoint
+                for waypoint in next_waypoints
+                if getattr(
+                    waypoint,
+                    "id",
+                    id(waypoint),
+                ) not in visited
+            ]
+
+            candidates = (
+                unvisited
+                if unvisited
+                else next_waypoints
+            )
+
+            current_waypoint = min(
+                candidates,
+                key=lambda waypoint: (
+                    (
+                        waypoint.transform.location.x
+                        - destination.x
+                    ) ** 2
+                    +
+                    (
+                        waypoint.transform.location.y
+                        - destination.y
+                    ) ** 2
+                ),
+            )
+
+        return route
+
     # =========================================================
     # VELOCITY
     # =========================================================
@@ -528,8 +672,19 @@ class VehicleManager:
             bool(reverse)
         )
 
+        print(
+            "M5 CONTROL SENT:",
+            control.throttle,
+            control.steer,
+            control.brake,
+        )
+
         self.vehicle.apply_control(
             control
+        )
+
+        print(
+            "CARLA CONTROL APPLIED"
         )
 
         return control

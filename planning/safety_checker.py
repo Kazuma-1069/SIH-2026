@@ -142,6 +142,66 @@ class BubbleShield:
             "reason": "BUBBLE_CLEAR",
         }
 
+    def check_path(self, path):
+        """
+        Check whether any path point enters the Bubble Shield.
+        """
+
+        if not path:
+            return {
+                "safe": False,
+                "path_safe": False,
+                "reason": "EMPTY_PATH",
+                "minimum_distance": float("inf"),
+            }
+
+        minimum_distance = float("inf")
+
+        for point in path:
+            if (
+                not isinstance(point, (list, tuple))
+                or len(point) != 2
+            ):
+                return {
+                    "safe": False,
+                    "path_safe": False,
+                    "reason": "INVALID_PATH_POINT",
+                    "minimum_distance": minimum_distance,
+                }
+
+            distance = (
+                self.obstacle_map
+                .distance_to_nearest_obstacle(point)
+            )
+
+            minimum_distance = min(
+                minimum_distance,
+                distance
+            )
+
+            if distance <= self.emergency_radius:
+                return {
+                    "safe": False,
+                    "path_safe": False,
+                    "reason": "EMERGENCY_BUBBLE_VIOLATION",
+                    "minimum_distance": minimum_distance,
+                }
+
+            if distance <= self.radius:
+                return {
+                    "safe": False,
+                    "path_safe": False,
+                    "reason": "BUBBLE_VIOLATION",
+                    "minimum_distance": minimum_distance,
+                }
+
+        return {
+            "safe": True,
+            "path_safe": True,
+            "reason": "BUBBLE_CLEAR",
+            "minimum_distance": minimum_distance,
+        }
+
     def validate_path(self, path):
         """
         Check whether any path point enters the Bubble Shield.

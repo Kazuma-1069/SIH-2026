@@ -210,8 +210,8 @@ class SensorManager:
 
     def spawn_rgb_camera(
         self,
-        width=1280,
-        height=720
+        width=640,
+        height=360
     ):
 
         print(
@@ -273,8 +273,8 @@ class SensorManager:
 
     def spawn_depth_camera(
         self,
-        width=1280,
-        height=720
+        width=640,
+        height=360
     ):
 
         print(
@@ -349,6 +349,21 @@ class SensorManager:
             .find(
                 "sensor.lidar.ray_cast"
             )
+        )
+
+        blueprint.set_attribute(
+            "channels",
+            "16"
+        )
+
+        blueprint.set_attribute(
+            "points_per_second",
+            "56000"
+        )
+
+        blueprint.set_attribute(
+            "range",
+            "50"
         )
 
 
