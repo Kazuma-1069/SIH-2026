@@ -43,6 +43,9 @@ class VehicleController:
 
         self.last_heading_error = 0.0
 
+        self.last_steer = 0.0
+        self.max_steer_change = 0.15
+
 
     def _distance(
         self,
@@ -74,6 +77,9 @@ class VehicleController:
         vehicle_location,
         target_point,
         vehicle_heading=None,
+        path_heading=None,
+        lateral_error=0.0,
+        pursuit_distance=None,
     ):
 
         dx = (
@@ -112,24 +118,67 @@ class VehicleController:
             + math.pi
         ) % (2 * math.pi) - math.pi
 
-        self.last_heading_error = heading_error
+        path_error = 0.0
+        if path_heading is not None:
+            path_error = (
+                path_heading
+                -
+                current_angle
+                + math.pi
+            ) % (2 * math.pi) - math.pi
 
-        # A proportional heading correction gives M5
-        # smooth steering while retaining CARLA's range.
-        steer = (
-            heading_error
-            /
-            math.pi
+        lateral_heading_error = math.atan2(
+            -lateral_error,
+            max(
+                pursuit_distance
+                if pursuit_distance is not None
+                else self.lookahead_distance,
+                1.0,
+            ),
         )
 
+        # CARLA uses positive steering for a positive yaw correction.
+        raw_steer = (
+            0.70 * heading_error
+            +
+            0.20 * path_error
+            +
+            0.10 * lateral_heading_error
+        ) / math.pi
 
-        return max(
+        self.last_heading_error = heading_error
+
+        desired_steer = max(
             -1.0,
             min(
                 1.0,
-                steer
+                raw_steer
             )
         )
+        steer_change = max(
+            -self.max_steer_change,
+            min(
+                self.max_steer_change,
+                desired_steer - self.last_steer
+            )
+        )
+        steer = self.last_steer + steer_change
+        steer = max(
+            -1.0,
+            min(
+                1.0,
+                steer,
+            ),
+        )
+        self.last_steer = steer
+
+        print("CURRENT YAW:", vehicle_heading)
+        print("TARGET ANGLE:", math.degrees(target_angle))
+        print("HEADING ERROR:", math.degrees(heading_error))
+        print("RAW STEER:", raw_steer)
+
+
+        return steer
 
 
     def compute_control(
@@ -159,6 +208,33 @@ class VehicleController:
         path_safe = planning_output.get(
             "path_safe",
             True
+        )
+
+        bubble_safe = planning_output.get(
+            "bubble_safe",
+            True
+        )
+
+        bubble_emergency = planning_output.get(
+            "bubble_emergency",
+            False
+        )
+
+        bubble_path_safe = planning_output.get(
+            "bubble_path_safe",
+            True
+        )
+
+        current_path_blocked = planning_output.get(
+            "current_path_blocked",
+            False
+        )
+
+        safety_stop_required = (
+            path_safe is False
+            or bubble_safe is False
+            or bubble_emergency
+            or bubble_path_safe is False
         )
 
 
@@ -241,16 +317,16 @@ class VehicleController:
 
         if action == "STOP":
 
-            return {
-                "throttle": 0.0,
-                "steer": 0.0,
-                "brake": 1.0,
-            }
-
-
-
-        # ==========================
-        # WAYPOINT FOLLOWING
+            if not waypoints:
+                return {
+                    "throttle": 0.0,
+                    "steer": 0.0,
+                    "brake": 1.0,
+                }
+            target_speed = max(
+                target_speed,
+                2.0,
+            )
         # ==========================
 
         steer = 0.0
@@ -286,12 +362,9 @@ class VehicleController:
                 else None
             )
 
-            # Keep route order while discarding points behind the vehicle.
+            # Find the closest route waypoint that is ahead of the vehicle.
             forward_indices = []
-            for index in range(
-                self.current_waypoint,
-                len(waypoints),
-            ):
+            for index in range(len(waypoints)):
                 dx = waypoints[index][0] - vehicle_location[0]
                 dy = waypoints[index][1] - vehicle_location[1]
                 is_ahead = (
@@ -302,15 +375,35 @@ class VehicleController:
                     forward_indices.append(index)
 
             if not forward_indices:
-                forward_indices = [
-                    min(
-                        self.current_waypoint + 1,
-                        len(waypoints) - 1,
-                    )
-                ]
+                forward_indices = [len(waypoints) - 1]
 
+            nearest_index = min(
+                forward_indices,
+                key=lambda index: self._distance(
+                    vehicle_location,
+                    waypoints[index],
+                ),
+            )
+            nearest_index = max(
+                self.current_waypoint,
+                nearest_index,
+            )
+            forward_indices = [
+                index
+                for index in forward_indices
+                if index >= nearest_index
+            ] or [nearest_index]
+
+            dynamic_lookahead = max(
+                2.0,
+                self.lookahead_distance * (
+                    0.70
+                    +
+                    0.06 * max(target_speed, 0.0)
+                ),
+            )
             lookahead_index = forward_indices[-1]
-            lookahead_remaining = self.lookahead_distance
+            lookahead_remaining = dynamic_lookahead
             previous_point = vehicle_location
             for index in forward_indices:
                 lookahead_remaining -= self._distance(
@@ -322,66 +415,67 @@ class VehicleController:
                     lookahead_index = index
                     break
 
-            candidate_indices = [
-                index
-                for index in forward_indices
-                if lookahead_index <= index <= lookahead_index + 2
-            ]
-
-            def heading_error_for(index):
-                if vehicle_angle is None:
-                    return 0.0
-                dx = waypoints[index][0] - vehicle_location[0]
-                dy = waypoints[index][1] - vehicle_location[1]
-                target_angle = math.atan2(dy, dx)
-                return abs(
-                    (target_angle - vehicle_angle + math.pi)
-                    % (2.0 * math.pi) - math.pi
-                )
-
-            target_index = min(
-                candidate_indices,
-                key=lambda index: (
-                    heading_error_for(index),
-                    self._distance(
-                        vehicle_location,
-                        waypoints[index],
-                    ),
-                ),
-            )
+            target_index = lookahead_index
             self.current_waypoint = max(
                 self.current_waypoint,
-                target_index,
+                nearest_index,
             )
             target = waypoints[target_index]
+
+            path_heading = None
+            lateral_error = 0.0
+            if nearest_index < len(waypoints) - 1:
+                route_start = waypoints[nearest_index]
+                route_end = waypoints[nearest_index + 1]
+            elif nearest_index > 0:
+                route_start = waypoints[nearest_index - 1]
+                route_end = waypoints[nearest_index]
+            else:
+                route_start = waypoints[nearest_index]
+                route_end = target
+
+            route_dx = route_end[0] - route_start[0]
+            route_dy = route_end[1] - route_start[1]
+            route_length = math.hypot(route_dx, route_dy)
+            if route_length > 0.0:
+                path_heading = math.atan2(
+                    route_dy,
+                    route_dx,
+                )
+                lateral_error = (
+                    route_dx * (vehicle_location[1] - route_start[1])
+                    -
+                    route_dy * (vehicle_location[0] - route_start[0])
+                ) / route_length
 
             steer = self._calculate_steering(
                 vehicle_location,
                 target,
                 vehicle_heading,
+                path_heading,
+                lateral_error,
+                dynamic_lookahead,
             )
 
             print(
                 "CURRENT WAYPOINT INDEX:",
-                self.current_waypoint,
+                nearest_index,
             )
             print(
                 "TARGET WAYPOINT:",
                 target,
             )
-            print(
-                "HEADING ERROR:",
-                math.degrees(
-                    self.last_heading_error
-                ),
-            )
-            print("STEER:", steer)
 
 
 
         # ==========================
         # SPEED CONTROL
         # ==========================
+
+        target_speed *= max(
+            0.35,
+            1.0 - 0.65 * abs(steer),
+        )
 
         throttle = min(
             max(
@@ -391,10 +485,22 @@ class VehicleController:
             0.7,
         )
 
-        # Slow down progressively when the lookahead target requires a turn.
-        throttle *= max(
-            0.35,
-            1.0 - 0.65 * abs(steer),
+        brake = 0.0
+        if safety_stop_required:
+            throttle = 0.0
+            steer = 0.0
+            brake = 1.0
+
+        print(
+            "SAFETY/BUBBLE STATUS:",
+            {
+                "path_safe": path_safe,
+                "current_path_blocked": current_path_blocked,
+                "bubble_safe": bubble_safe,
+                "bubble_emergency": bubble_emergency,
+                "bubble_path_safe": bubble_path_safe,
+                "stop_required": safety_stop_required,
+            },
         )
 
         print(
@@ -405,6 +511,14 @@ class VehicleController:
             "TARGET SPEED:",
             target_speed,
         )
+        print(
+            "FINAL THROTTLE:",
+            throttle,
+        )
+        print(
+            "FINAL BRAKE:",
+            brake,
+        )
 
 
 
@@ -414,6 +528,6 @@ class VehicleController:
 
             "steer": steer,
 
-            "brake": 0.0,
+            "brake": brake,
 
         }

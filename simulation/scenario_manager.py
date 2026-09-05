@@ -3,9 +3,14 @@ CARLA scenario management for SIH 2026.
 
 Supported scenarios:
     - normal
+    - normal_driving
     - static_obstacle
     - dynamic_obstacle
     - pothole
+    - parked_vehicle
+    - pedestrian
+    - construction_barricade
+    - indian_road_hazards
     - combined
 
 CARLA version:
@@ -31,11 +36,42 @@ class ScenarioManager:
 
     SUPPORTED_SCENARIOS = [
         "normal",
+        "normal_driving",
         "static_obstacle",
         "dynamic_obstacle",
         "pothole",
+        "parked_vehicle",
+        "pedestrian",
+        "construction_barricade",
+        "indian_road_hazards",
         "combined",
     ]
+
+    SCENARIO_HAZARDS = {
+        "normal": (),
+        "normal_driving": (),
+        "pothole": ("pothole",),
+        "parked_vehicle": ("parked_vehicle",),
+        "pedestrian": ("pedestrian",),
+        "construction_barricade": ("construction_barricade",),
+        "indian_road_hazards": (
+            "pothole",
+            "parked_vehicle",
+            "pedestrian",
+            "construction_barricade",
+        ),
+    }
+
+    POTHOLE_POSITIONS = (
+        (24.0, -0.9),
+        (42.0, 0.8),
+        (60.0, -0.6),
+    )
+
+    INDIAN_ROAD_POTHOLE_POSITIONS = (
+        (24.0, -0.9),
+        (42.0, 0.8),
+    )
 
     def __init__(
         self,
@@ -86,7 +122,7 @@ class ScenarioManager:
 
         self.active_scenario = scenario_name
 
-        if scenario_name == "normal":
+        if scenario_name in ("normal", "normal_driving"):
             self._setup_normal()
 
         elif scenario_name == "static_obstacle":
@@ -95,8 +131,13 @@ class ScenarioManager:
         elif scenario_name == "dynamic_obstacle":
             self._setup_dynamic_obstacle()
 
-        elif scenario_name == "pothole":
-            self._setup_pothole()
+        elif scenario_name == "indian_road_hazards":
+            self._setup_indian_road_hazards()
+
+        elif scenario_name in self.SCENARIO_HAZARDS:
+            self._setup_configured_hazards(
+                self.SCENARIO_HAZARDS[scenario_name]
+            )
 
         elif scenario_name == "combined":
             self._setup_combined()
@@ -381,6 +422,227 @@ class ScenarioManager:
     # ============================================================
     # POTHOLE
     # ============================================================
+
+    def _setup_configured_hazards(
+        self,
+        hazard_types,
+    ) -> None:
+        """Spawn deterministic hazards enabled by the active scenario."""
+
+        for hazard_type in hazard_types:
+            spawn_method = getattr(
+                self,
+                f"_spawn_{hazard_type}",
+            )
+            spawn_method()
+
+    def _hazard_transform(
+        self,
+        distance_ahead: float,
+        lateral_offset: float = 0.0,
+    ) -> Optional[carla.Transform]:
+        """Return a deterministic transform projected onto a driving lane."""
+
+        if self.vehicle is None:
+            print("[M4] Warning: no ego vehicle supplied.")
+            return None
+
+        ego_transform = self.vehicle.get_transform()
+        forward = ego_transform.get_forward_vector()
+        right = ego_transform.get_right_vector()
+        probe = ego_transform.location + carla.Location(
+            x=forward.x * distance_ahead + right.x * lateral_offset,
+            y=forward.y * distance_ahead + right.y * lateral_offset,
+            z=0.0,
+        )
+
+        try:
+            waypoint = self.world.get_map().get_waypoint(
+                probe,
+                project_to_road=True,
+                lane_type=carla.LaneType.Driving,
+            )
+        except Exception as exc:
+            print(f"[M4] Waypoint lookup warning: {exc}")
+            waypoint = None
+
+        if waypoint is None:
+            return None
+
+        lane_right = waypoint.transform.get_right_vector()
+        location = waypoint.transform.location + carla.Location(
+            x=lane_right.x * lateral_offset,
+            y=lane_right.y * lateral_offset,
+            z=0.0,
+        )
+        location.z += 0.05
+        return carla.Transform(
+            location,
+            waypoint.transform.rotation,
+        )
+
+    def _record_hazard(
+        self,
+        hazard_type: str,
+        actor: Optional[carla.Actor],
+        transform: carla.Transform,
+        distance_ahead: float,
+        lateral_offset: float,
+        severity: str,
+        dynamic: bool = False,
+    ) -> None:
+        if actor is not None:
+            self.actors.append(actor)
+
+        self.hazards.append(
+            {
+                "id": actor.id if actor is not None else None,
+                "type": hazard_type,
+                "location": self._location_to_dict(transform.location),
+                "distance_ahead": distance_ahead,
+                "lateral_offset": lateral_offset,
+                "severity": severity,
+                "dynamic": dynamic,
+                "active": actor is not None,
+            }
+        )
+
+    def _spawn_pothole(self) -> None:
+        self._spawn_potholes(self.POTHOLE_POSITIONS)
+
+    def _spawn_potholes(self, positions) -> None:
+        blueprint_library = self.world.get_blueprint_library()
+        try:
+            blueprint = blueprint_library.find("static.prop.dirtdebris01")
+        except Exception as exc:
+            print(f"[M4] Pothole asset unavailable: {exc}")
+            return
+
+        for distance_ahead, lateral_offset in positions:
+            transform = self._hazard_transform(
+                distance_ahead,
+                lateral_offset,
+            )
+            if transform is None:
+                continue
+
+            actor = self.world.try_spawn_actor(blueprint, transform)
+            self._record_hazard(
+                "pothole",
+                actor,
+                transform,
+                distance_ahead,
+                lateral_offset,
+                "medium",
+            )
+
+        print(
+            "[M4] Spawned deterministic physical potholes using "
+            "static.prop.dirtdebris01."
+        )
+
+    def _spawn_parked_vehicle(self) -> None:
+        self._spawn_parked_vehicle_at(28.0, 0.0)
+
+    def _spawn_parked_vehicle_at(
+        self,
+        distance_ahead: float,
+        lateral_offset: float,
+    ) -> None:
+        transform = self._hazard_transform(distance_ahead, lateral_offset)
+        if transform is None:
+            return
+
+        blueprints = sorted(
+            self.world.get_blueprint_library().filter("vehicle.*"),
+            key=lambda blueprint_item: blueprint_item.id,
+        )
+        actor = (
+            self.world.try_spawn_actor(blueprints[0], transform)
+            if blueprints
+            else None
+        )
+        self._record_hazard(
+            "parked_vehicle",
+            actor,
+            transform,
+            distance_ahead,
+            lateral_offset,
+            "high",
+        )
+
+    def _spawn_pedestrian(self) -> None:
+        self._spawn_pedestrian_at(22.0, 1.5)
+
+    def _spawn_pedestrian_at(
+        self,
+        distance_ahead: float,
+        lateral_offset: float,
+    ) -> None:
+        transform = self._hazard_transform(distance_ahead, lateral_offset)
+        if transform is None:
+            return
+
+        blueprints = sorted(
+            self.world.get_blueprint_library().filter(
+                "walker.pedestrian.*"
+            ),
+            key=lambda blueprint_item: blueprint_item.id,
+        )
+        actor = (
+            self.world.try_spawn_actor(blueprints[0], transform)
+            if blueprints
+            else None
+        )
+        self._record_hazard(
+            "pedestrian",
+            actor,
+            transform,
+            distance_ahead,
+            lateral_offset,
+            "high",
+            True,
+        )
+
+    def _spawn_construction_barricade(self) -> None:
+        self._spawn_construction_barricade_at(36.0, 0.0)
+
+    def _spawn_construction_barricade_at(
+        self,
+        distance_ahead: float,
+        lateral_offset: float,
+    ) -> None:
+        transform = self._hazard_transform(distance_ahead, lateral_offset)
+        if transform is None:
+            return
+
+        try:
+            blueprint = self.world.get_blueprint_library().find(
+                "static.prop.streetbarrier"
+            )
+        except Exception as exc:
+            print(f"[M4] Barricade asset unavailable: {exc}")
+            return
+
+        actor = (
+            self.world.try_spawn_actor(blueprint, transform)
+        )
+        self._record_hazard(
+            "construction_barricade",
+            actor,
+            transform,
+            distance_ahead,
+            lateral_offset,
+            "high",
+        )
+
+    def _setup_indian_road_hazards(self) -> None:
+        """Spawn the deterministic set of physical Indian road hazards."""
+
+        self._spawn_potholes(self.INDIAN_ROAD_POTHOLE_POSITIONS)
+        self._spawn_parked_vehicle_at(30.0, 2.0)
+        self._spawn_pedestrian_at(22.0, 1.5)
+        self._spawn_construction_barricade_at(36.0, -2.0)
 
     def _setup_pothole(self) -> None:
         """
