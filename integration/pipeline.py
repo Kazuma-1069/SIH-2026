@@ -7,6 +7,8 @@ CARLA/M4
    ↓
 M2 Perception
    ↓
+M0 Navigation State
+   ↓
 M1 Planning
    ↓
 M5 Vehicle Control
@@ -16,10 +18,17 @@ CARLA Vehicle
 M3 Visualization
 """
 
-from integration.data_adapter import perception_to_planning_input
+from integration.data_adapter import (
+    perception_to_planning_input
+)
+
+from planning.coordinate_adapter import (
+    CoordinateAdapter
+)
 
 
 class IntegrationPipeline:
+
 
     def __init__(
         self,
@@ -28,9 +37,15 @@ class IntegrationPipeline:
         controller=None,
         dashboard=None,
         vehicle=None,
+        destination=None,
     ):
 
-        self.perception_pipeline = perception_pipeline
+        # M2
+        self.perception_pipeline = (
+            perception_pipeline
+        )
+
+        # M1
         self.planner = planner
 
         # M5
@@ -39,8 +54,16 @@ class IntegrationPipeline:
         # M3
         self.dashboard = dashboard
 
-        # M4 vehicle interface
+        # M4 VehicleManager
         self.vehicle = vehicle
+
+        # M0 destination
+        self.destination = destination
+
+        # CARLA -> Planner grid
+        self.coordinate_adapter = (
+            CoordinateAdapter()
+        )
 
 
     def process_frame(
@@ -50,19 +73,19 @@ class IntegrationPipeline:
         save_path=None,
     ):
 
+
         # ==========================
         # M2 PERCEPTION
         # ==========================
 
         perception_output = (
-            self.perception_pipeline.process_frame(
-                frame
-            )
+            self.perception_pipeline
+            .process_frame(frame)
         )
 
 
         # ==========================
-        # M2 -> M1 ADAPTER
+        # M2 -> M1
         # ==========================
 
         planning_input = (
@@ -70,6 +93,71 @@ class IntegrationPipeline:
                 perception_output
             )
         )
+
+
+        # ==========================
+        # M0 NAVIGATION
+        # ==========================
+
+        ego_position = None
+
+
+        if self.vehicle is not None:
+
+            location = (
+                self.vehicle.get_location()
+            )
+
+            if location is not None:
+
+                ego_position = (
+                    self.coordinate_adapter
+                    .world_to_grid(
+                        [
+                            location.x,
+                            location.y,
+                        ]
+                    )
+                )
+
+                planning_input[
+                    "ego_position"
+                ] = ego_position
+
+
+
+        # Destination -> planner goal
+
+        if self.destination is not None:
+
+            planning_input[
+                "goal"
+            ] = (
+                self.coordinate_adapter
+                .world_to_grid(
+                    [
+                        self.destination.x,
+                        self.destination.y,
+                    ]
+                )
+            )
+
+
+
+        # ==========================
+        # M0 DESTINATION CHECK
+        # ==========================
+
+        destination_reached = False
+
+
+        if self.vehicle is not None:
+
+            destination_reached = (
+                self.vehicle
+                .has_reached_destination()
+            )
+
 
 
         # ==========================
@@ -83,24 +171,47 @@ class IntegrationPipeline:
         )
 
 
+        planning_output[
+            "destination_reached"
+        ] = destination_reached
+
+
+
         # ==========================
-        # M5 VEHICLE CONTROL
+        # M5 CONTROL
         # ==========================
 
         control_command = None
 
 
-        if self.controller is not None:
+        if destination_reached:
+
+            control_command = {
+
+                "throttle": 0.0,
+
+                "steer": 0.0,
+
+                "brake": 1.0,
+
+            }
+
+
+        elif self.controller is not None:
+
 
             control_command = (
-                self.controller.compute_control(
-                    planning_output
+                self.controller
+                .compute_control(
+                    planning_output,
+                    ego_position,
                 )
             )
 
 
+
         # ==========================
-        # M5 -> M4 CARLA VEHICLE
+        # M5 -> M4
         # ==========================
 
         if (
@@ -108,11 +219,29 @@ class IntegrationPipeline:
             and control_command is not None
         ):
 
+
             self.vehicle.apply_control(
-    throttle=control_command["throttle"],
-    steer=control_command["steer"],
-    brake=control_command["brake"],
-)
+
+                throttle=(
+                    control_command[
+                        "throttle"
+                    ]
+                ),
+
+                steer=(
+                    control_command[
+                        "steer"
+                    ]
+                ),
+
+                brake=(
+                    control_command[
+                        "brake"
+                    ]
+                ),
+
+            )
+
 
 
         # ==========================
@@ -121,22 +250,41 @@ class IntegrationPipeline:
 
         if self.dashboard is not None:
 
+
             self.dashboard.render(
-                perception_output=perception_output,
-                planning_output=planning_output,
-                control_output=control_command,
+
+                perception_output=(
+                    perception_output
+                ),
+
+                planning_output=(
+                    planning_output
+                ),
+
+                control_output=(
+                    control_command
+                ),
+
                 camera_frame=frame,
+
                 show=show,
+
                 save_path=save_path,
+
             )
 
 
+
         # ==========================
-        # OUTPUT FOR M6 TESTING
+        # M6 OUTPUT
         # ==========================
 
         return (
+
             perception_output,
+
             planning_output,
+
             control_command,
+
         )

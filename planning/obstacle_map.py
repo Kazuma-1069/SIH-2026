@@ -1,141 +1,336 @@
+"""
+SIH-2026 Obstacle Map
+
+Compatible with:
+- Planner
+- A*
+- Dijkstra
+- Bubble Shield
+- Safety Checker
+- Perception object updates
+"""
+
+import math
+
+
 class ObstacleMap:
-    """
-    Grid-based obstacle map for path planning.
 
-    M1 receives obstacle information from the perception module (M2)
-    and converts it into a grid that A* / Dijkstra can use.
-    """
 
-    def __init__(self, width=20, height=20):
-    # Support both ObstacleMap(20, 20) and ObstacleMap((20, 20))
-     if isinstance(width, tuple):
-        width, height = width
-    
-     self.width = int(width)
-     self.height = int(height)
+    def __init__(
+        self,
+        width=100,
+        height=100
+    ):
 
-    # 0 = free, 1 = obstacle
-     self.grid = [
-        [0 for _ in range(self.width)]
-        for _ in range(self.height)
-    ]
-    
+        self.width = width
+        self.height = height
 
-    def clear(self):
-        """Clear all obstacles from the grid."""
+
         self.grid = [
-            [0 for _ in range(self.width)]
-            for _ in range(self.height)
+            [
+                0
+                for _ in range(width)
+            ]
+            for _ in range(height)
         ]
 
-    def add_obstacle(self, x, y):
-     """Mark a grid cell as occupied."""
-     if 0 <= x < self.width and 0 <= y < self.height:
-      self.grid[y][x] = 1
 
-    def remove_obstacle(self, x, y):
-     """Mark a grid cell as free."""
-     if 0 <= x < self.width and 0 <= y < self.height:
-        self.grid[y][x] = 0
-            
-    def set_obstacle(self, x, y=None, occupied=True):
-     """Set or clear a grid cell as occupied or free.
+        self.obstacles = []
 
-     sSupports both:
-        set_obstacle(x, y, occupied)
-        set_obstacle((x, y), occupied)
-     """
-     if isinstance(x, tuple):
-        x, y, occupied = x[0], x[1], y
 
-     if occupied:
-        self.add_obstacle(x, y)
-     else:
-        self.remove_obstacle(x, y)
 
-    def is_occupied(self, x, y):
-        """Return True if the cell contains an obstacle."""
-        if not (0 <= x < self.width and 0 <= y < self.height):
-            return True
+    # =====================================================
+    # GRID FUNCTIONS
+    # =====================================================
 
-        return self.grid[y][x] == 1
-    
-    def is_path_blocked(self, path):
+
+    def clear_grid(self):
+
+        for y in range(self.height):
+
+            for x in range(self.width):
+
+                self.grid[y][x] = 0
+
+
+
+    def set_obstacle(
+        self,
+        x,
+        y,
+        value=1
+    ):
+
+        if (
+            0 <= x < self.width
+            and
+            0 <= y < self.height
+        ):
+
+            self.grid[y][x] = value
+
+
+
+    def is_obstacle(
+        self,
+        x,
+        y
+    ):
+
+        if (
+            0 <= x < self.width
+            and
+            0 <= y < self.height
+        ):
+
+            return self.grid[y][x] == 1
+
+
+        return True
+
+
+
+    # =====================================================
+    # OBJECT UPDATES FROM PERCEPTION
+    # =====================================================
+
+
+    def update_from_objects(
+        self,
+        objects
+    ):
+
         """
-        Return True if any part of the path intersects
-        an occupied grid cell.
+        Update obstacle map from M2 perception objects.
 
-        Consecutive path points are interpolated so that
-        obstacles between sparse waypoints are detected.
-        """
-        if not path:
-            return False
+        Expected:
 
-        points = list(path)
-
-        # Check every path segment.
-        for start, end in zip(points, points[1:]):
-            x1, y1 = start
-            x2, y2 = end
-
-            dx = x2 - x1
-            dy = y2 - y1
-
-            steps = max(abs(dx), abs(dy))
-
-            if steps == 0:
-                if self.is_occupied(x1, y1):
-                    return True
-                continue
-
-            for i in range(steps + 1):
-                x = round(x1 + dx * i / steps)
-                y = round(y1 + dy * i / steps)
-
-                if self.is_occupied(x, y):
-                    return True
-
-        # Also check a one-point path.
-        if len(points) == 1:
-            return self.is_occupied(
-                points[0][0],
-                points[0][1]
-            )
-
-        return False
-    
-
-    def update_from_objects(self, objects):
-        """
-        Convert perception objects into occupied grid cells.
-
-        Each object should contain:
+        [
             {
-                "bbox": [x1, y1, x2, y2]
+                "position":[x,y],
+                "radius":2
             }
+        ]
         """
 
-        self.clear()
+
+        self.obstacles.clear()
+
+        self.clear_grid()
+
+
+        if objects is None:
+            return
+
+
 
         for obj in objects:
-            bbox = obj.get("bbox")
 
-            if not bbox or len(bbox) != 4:
-                continue
 
-            x1, y1, x2, y2 = bbox
+            if isinstance(
+                obj,
+                dict
+            ):
 
-            # Use the center of the bounding box as
-            # the approximate obstacle position.
-            center_x = int((x1 + x2) / 2)
-            center_y = int((y1 + y2) / 2)
+                position = obj.get(
+                    "position",
+                    [0,0]
+                )
 
-            # Keep the prototype mapping simple.
-            grid_x = int(center_x / 10)
-            grid_y = int(center_y / 10)
-            
-            self.add_obstacle(grid_x, grid_y)
 
-    def get_grid(self):
-        """Return the current occupancy grid."""
-        return self.grid
+                radius = obj.get(
+                    "radius",
+                    2
+                )
+
+
+            else:
+
+                position = getattr(
+                    obj,
+                    "position",
+                    [0,0]
+                )
+
+
+                radius = 2
+
+
+
+            self.add_obstacle(
+                position,
+                radius
+            )
+
+
+
+    # =====================================================
+    # ADD OBSTACLE
+    # =====================================================
+
+
+    def add_obstacle(
+        self,
+        position,
+        radius=2.0,
+        obstacle_type="unknown"
+    ):
+
+
+        self.obstacles.append(
+            {
+                "position": position,
+                "radius": radius,
+                "type": obstacle_type
+            }
+        )
+
+
+
+        cx = int(
+            position[0]
+        )
+
+        cy = int(
+            position[1]
+        )
+
+
+        for dx in range(
+            -int(radius),
+            int(radius)+1
+        ):
+
+            for dy in range(
+                -int(radius),
+                int(radius)+1
+            ):
+
+                if (
+                    dx*dx + dy*dy
+                    <= radius*radius
+                ):
+
+                    self.set_obstacle(
+                        cx + dx,
+                        cy + dy
+                    )
+
+
+
+    def update(
+        self,
+        obstacles
+    ):
+
+        self.update_from_objects(
+            obstacles
+        )
+
+
+
+    # =====================================================
+    # BUBBLE SHIELD
+    # =====================================================
+
+
+    def distance_to_nearest_obstacle(
+        self,
+        ego_position
+    ):
+
+
+        if not self.obstacles:
+
+            return float("inf")
+
+
+
+        nearest = float("inf")
+
+
+
+        for obstacle in self.obstacles:
+
+
+            position = obstacle[
+                "position"
+            ]
+
+
+            distance = math.sqrt(
+
+                (
+                    ego_position[0]
+                    -
+                    position[0]
+                ) ** 2
+
+                +
+
+                (
+                    ego_position[1]
+                    -
+                    position[1]
+                ) ** 2
+
+            )
+
+
+            distance -= obstacle[
+                "radius"
+            ]
+
+
+            nearest = min(
+                nearest,
+                distance
+            )
+
+
+
+        return max(
+            nearest,
+            0.0
+        )
+
+
+
+    def is_collision(
+        self,
+        position,
+        safety_distance=2.0
+    ):
+
+        return (
+
+            self.distance_to_nearest_obstacle(
+                position
+            )
+            <
+            safety_distance
+
+        )
+
+
+
+    # =====================================================
+    # ACCESS
+    # =====================================================
+
+
+    def get_obstacles(
+        self
+    ):
+
+        return self.obstacles
+
+
+
+    def __len__(
+        self
+    ):
+
+        return len(
+            self.obstacles
+        )
