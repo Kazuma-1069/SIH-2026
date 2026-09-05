@@ -55,6 +55,10 @@ from simulation.sensors import (
     SensorManager
 )
 
+from simulation.scenario_manager import (
+    ScenarioManager
+)
+
 
 from perception.yolo_detector import (
     YOLODetector
@@ -177,6 +181,15 @@ def create_system():
         destination_transform.location
     )
 
+    # M4 scenarios are opt-in; normal_driving remains hazard-free by default.
+    scenario_manager = ScenarioManager(
+        world,
+        vehicle=vehicle,
+    )
+    scenario_manager.set_scenario(
+        os.getenv("M4_SCENARIO", "normal_driving")
+    )
+
 
 
     # ==========================
@@ -289,6 +302,8 @@ def create_system():
 
         pipeline,
 
+        scenario_manager,
+
     )
 
 
@@ -314,6 +329,8 @@ def main():
 
     sensor_manager = None
 
+    scenario_manager = None
+
 
 
     try:
@@ -328,6 +345,8 @@ def main():
             sensor_manager,
 
             pipeline,
+
+            scenario_manager,
 
         ) = create_system()
 
@@ -585,6 +604,10 @@ def main():
         if vehicle_manager is not None:
 
             vehicle_manager.destroy()
+
+        if scenario_manager is not None:
+
+            scenario_manager.destroy()
 
 
 
