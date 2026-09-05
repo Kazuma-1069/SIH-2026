@@ -29,6 +29,10 @@ from planning.coordinate_adapter import (
 import math
 
 
+from integration.data_adapter import perception_to_planning_input
+from simulation.controller import VehicleController
+
+
 class IntegrationPipeline:
 
 
@@ -55,6 +59,7 @@ class IntegrationPipeline:
 
         # M3
         self.dashboard = dashboard
+        self.controller = VehicleController()
 
         # M4 VehicleManager
         self.vehicle = vehicle
@@ -395,6 +400,7 @@ class IntegrationPipeline:
             planning_input
         )
 
+<<<<<<< HEAD
         print(
             "PLANNING OUTPUT:"
         )
@@ -443,6 +449,23 @@ class IntegrationPipeline:
                     vehicle_location,
                     vehicle_heading,
                 )
+=======
+        # M5
+        control_command = (
+            self.controller.compute_control(
+                planning_output
+            )
+        )
+
+        # M3
+        if self.dashboard is not None:
+            self.dashboard.render(
+                perception_output=perception_output,
+                planning_output=planning_output,
+                camera_frame=frame,
+                show=show,
+                save_path=save_path,
+>>>>>>> d58e2256777630ae62c8c2eadc284e68ee816a36
             )
 
 
@@ -521,7 +544,11 @@ class IntegrationPipeline:
             perception_output,
 
             planning_output,
+<<<<<<< HEAD
 
             control_command,
 
+=======
+            control_command,
+>>>>>>> d58e2256777630ae62c8c2eadc284e68ee816a36
         )

@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 """
 SIH-2026 M5 Vehicle Controller
 
@@ -204,12 +205,34 @@ class VehicleController:
             "STOP"
         )
 
+=======
+class VehicleController:
+    """
+    M5 Vehicle Controller
+
+    Converts planning outputs into
+    throttle, steering and brake commands.
+    """
+
+    def compute_control(self, planning_output):
+
+        action = planning_output.get(
+            "action",
+            "PROCEED_FORWARD"
+        )
+
+        target_speed = planning_output.get(
+            "target_speed_mps",
+            5.0
+        )
+>>>>>>> d58e2256777630ae62c8c2eadc284e68ee816a36
 
         path_safe = planning_output.get(
             "path_safe",
             True
         )
 
+<<<<<<< HEAD
         bubble_safe = planning_output.get(
             "bubble_safe",
             True
@@ -289,12 +312,16 @@ class VehicleController:
 
         if not path_safe:
 
+=======
+        if not path_safe:
+>>>>>>> d58e2256777630ae62c8c2eadc284e68ee816a36
             return {
                 "throttle": 0.0,
                 "steer": 0.0,
                 "brake": 1.0,
             }
 
+<<<<<<< HEAD
 
 
         # ==========================
@@ -530,4 +557,20 @@ class VehicleController:
 
             "brake": brake,
 
+=======
+        if action == "STOP":
+            return {
+                "throttle": 0.0,
+                "steer": 0.0,
+                "brake": 1.0,
+            }
+
+        return {
+            "throttle": min(
+                target_speed / 10.0,
+                0.7
+            ),
+            "steer": 0.0,
+            "brake": 0.0,
+>>>>>>> d58e2256777630ae62c8c2eadc284e68ee816a36
         }
