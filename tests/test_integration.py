@@ -10,6 +10,7 @@ sys.path.insert(
         )
     )
 )
+from simulation.controller import VehicleController
 from integration.data_adapter import perception_to_planning_input
 from integration.pipeline import IntegrationPipeline
 from interfaces.perception_output import (
@@ -90,9 +91,10 @@ class FakePlanner:
 
 def test_integration_pipeline_m2_to_m1():
     pipeline = IntegrationPipeline(
-        perception_pipeline=FakePerceptionPipeline(),
-        planner=FakePlanner(),
-    )
+    perception_pipeline=FakePerceptionPipeline(),
+    planner=FakePlanner(),
+    controller=VehicleController(),
+)
 
     frame = object()
 
@@ -100,7 +102,9 @@ def test_integration_pipeline_m2_to_m1():
     frame
 )
     assert isinstance(perception_output, PerceptionOutput)
-    assert control_command is None
+    assert control_command is not None
+    assert control_command["throttle"] > 0
+    assert control_command["brake"] == 0.0
     assert planning_output["action"] == "PROCEED_FORWARD"
     assert planning_output["algorithm"] == "A_STAR"
     assert planning_output["path_safe"] is True

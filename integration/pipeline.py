@@ -109,8 +109,10 @@ class IntegrationPipeline:
         ):
 
             self.vehicle.apply_control(
-                control_command
-            )
+    throttle=control_command["throttle"],
+    steer=control_command["steer"],
+    brake=control_command["brake"],
+)
 
 
         # ==========================
