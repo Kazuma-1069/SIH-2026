@@ -169,7 +169,29 @@ class IntegrationPipeline:
                 planning_input
             )
         )
+        print(
+            "\n========== PLANNER DEBUG =========="
+        )
 
+        print(
+            "PLANNING INPUT:"
+        )
+
+        print(
+            planning_input
+        )
+
+        print(
+            "PLANNING OUTPUT:"
+        )
+
+        print(
+            planning_output
+        )
+
+        print(
+            "=================================="
+        )
 
         planning_output[
             "destination_reached"

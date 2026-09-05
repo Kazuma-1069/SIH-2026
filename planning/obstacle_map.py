@@ -57,9 +57,16 @@ class ObstacleMap:
     def set_obstacle(
         self,
         x,
-        y,
+        y=None,
         value=1
     ):
+
+        if isinstance(x, tuple):
+
+            if y is not None:
+                value = y
+
+            x, y = x
 
         if (
             0 <= x < self.width
@@ -87,6 +94,18 @@ class ObstacleMap:
 
 
         return True
+
+
+    def is_occupied(
+        self,
+        x,
+        y
+    ):
+
+        return self.is_obstacle(
+            x,
+            y
+        )
 
 
 

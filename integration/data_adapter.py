@@ -71,6 +71,7 @@ def perception_to_planning_input(
     # ==========================
 
     primary_objects = []
+    obstacle_positions = []
 
 
     for obj in objects:
@@ -79,6 +80,27 @@ def perception_to_planning_input(
             obj,
             dict
         ):
+
+            bbox = list(
+                obj.get(
+                    "bbox",
+                    []
+                )
+            )
+
+            position = obj.get(
+                "position",
+                obj.get(
+                    "center"
+                )
+            )
+
+            if position is None and len(bbox) == 4:
+
+                position = [
+                    (bbox[0] + bbox[2]) / 2.0,
+                    (bbox[1] + bbox[3]) / 2.0,
+                ]
 
             primary_objects.append(
                 {
@@ -111,20 +133,55 @@ def perception_to_planning_input(
                     ),
 
                     "bbox": list(
-                        obj.get(
-                            "bbox",
-                            []
-                        )
+                        bbox
                     ),
 
                     "distance": obj.get(
                         "distance"
                     ),
+
+                    "position": position,
+                }
+            )
+
+            obstacle_positions.append(
+                {
+                    "track_id": int(
+                        obj.get(
+                            "track_id",
+                            -1
+                        )
+                    ),
+                    "class_name": str(
+                        obj.get(
+                            "class_name",
+                            "unknown"
+                        )
+                    ),
+                    "distance": obj.get(
+                        "distance"
+                    ),
+                    "confidence": float(
+                        obj.get(
+                            "confidence",
+                            0.0
+                        )
+                    ),
+                    "position": position,
                 }
             )
 
 
         else:
+
+            position = getattr(
+                obj,
+                "position",
+                None
+            )
+
+            if position is None:
+                position = obj.center
 
             primary_objects.append(
                 {
@@ -134,6 +191,17 @@ def perception_to_planning_input(
                     "confidence": obj.confidence,
                     "bbox": list(obj.bbox),
                     "distance": obj.distance,
+                    "position": position,
+                }
+            )
+
+            obstacle_positions.append(
+                {
+                    "track_id": obj.track_id,
+                    "class_name": obj.class_name,
+                    "distance": obj.distance,
+                    "confidence": obj.confidence,
+                    "position": position,
                 }
             )
 
@@ -190,12 +258,14 @@ def perception_to_planning_input(
             lidar_obstacles,
 
 
+        "obstacle_positions":
+            obstacle_positions,
+
+
         "drivable_space":
             {
                 "obstacle_occupied_cells":
-                    len(primary_objects)
-                    +
-                    len(fallback_anomalies)
+                    0
             },
 
 
