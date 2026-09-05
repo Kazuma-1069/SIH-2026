@@ -1,6 +1,10 @@
 from integration.data_adapter import perception_to_planning_input
 
 
+from integration.data_adapter import perception_to_planning_input
+from simulation.controller import VehicleController
+
+
 class IntegrationPipeline:
 
     def __init__(
@@ -12,6 +16,7 @@ class IntegrationPipeline:
         self.perception_pipeline = perception_pipeline
         self.planner = planner
         self.dashboard = dashboard
+        self.controller = VehicleController()
 
     def process_frame(
         self,
@@ -36,6 +41,13 @@ class IntegrationPipeline:
             planning_input
         )
 
+        # M5
+        control_command = (
+            self.controller.compute_control(
+                planning_output
+            )
+        )
+
         # M3
         if self.dashboard is not None:
             self.dashboard.render(
@@ -49,4 +61,5 @@ class IntegrationPipeline:
         return (
             perception_output,
             planning_output,
+            control_command,
         )
