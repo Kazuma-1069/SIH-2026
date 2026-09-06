@@ -116,6 +116,9 @@ class PerceptionPipeline:
                     distance=obj.get(
                         "distance"
                     ),
+                    position=obj.get(
+                        "position"
+                    ),
                 )
             )
 

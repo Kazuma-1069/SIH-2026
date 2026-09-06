@@ -22,6 +22,10 @@ from integration.data_adapter import (
     perception_to_planning_input
 )
 
+from integration.simulation_hazard_bridge import (
+    bridge_scenario_hazards,
+)
+
 from planning.coordinate_adapter import (
     CoordinateAdapter
 )
@@ -44,6 +48,7 @@ class IntegrationPipeline:
         dashboard=None,
         vehicle=None,
         destination=None,
+        scenario_manager=None,
     ):
 
         # M2
@@ -64,6 +69,9 @@ class IntegrationPipeline:
         # M4 VehicleManager
         self.vehicle = vehicle
 
+        # M4 ScenarioManager (simulation hazard ground truth)
+        self.scenario_manager = scenario_manager
+
         # M0 destination
         self.destination = destination
 
@@ -73,6 +81,46 @@ class IntegrationPipeline:
         )
 
         self.road_waypoints = None
+
+
+    def _supplement_simulation_hazards(
+        self,
+        perception_output,
+    ):
+        """
+        Merge M4 ScenarioManager hazards into M2 perception output.
+
+        YOLO detections are preserved; simulation hazards supplement them.
+        """
+
+        if (
+            self.scenario_manager is None
+            or self.vehicle is None
+        ):
+            return perception_output
+
+        location = self.vehicle.get_location()
+        transform = self.vehicle.get_transform()
+
+        if location is None or transform is None:
+            return perception_output
+
+        bridged_hazards = bridge_scenario_hazards(
+            self.scenario_manager.get_hazards(),
+            ego_x=location.x,
+            ego_y=location.y,
+            ego_yaw_deg=transform.rotation.yaw,
+        )
+
+        if not bridged_hazards:
+            return perception_output
+
+        perception_output.hazards = (
+            list(perception_output.hazards)
+            + bridged_hazards
+        )
+
+        return perception_output
 
 
     def _build_road_route(
@@ -212,6 +260,12 @@ class IntegrationPipeline:
         perception_output = (
             self.perception_pipeline
             .process_frame(frame)
+        )
+
+        perception_output = (
+            self._supplement_simulation_hazards(
+                perception_output
+            )
         )
 
 
@@ -374,20 +428,29 @@ class IntegrationPipeline:
             )
         )
 
+        planner_waypoints = planning_output.get(
+            "waypoints"
+        )
+
         if (
-            self.road_waypoints
-            and planning_output.get(
-                "path_safe",
-                False
+            self.vehicle is not None
+            and isinstance(
+                planner_waypoints,
+                (list, tuple),
             )
-            and planning_output.get(
-                "action"
-            ) != "STOP"
+            and planner_waypoints
         ):
 
             planning_output[
                 "waypoints"
-            ] = self.road_waypoints
+            ] = [
+                self.coordinate_adapter
+                .grid_to_world(
+                    point
+                )
+                for point in planner_waypoints
+            ]
+
         print(
             "\n========== PLANNER DEBUG =========="
         )
