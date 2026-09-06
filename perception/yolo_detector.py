@@ -28,6 +28,7 @@ class YOLODetector(ObjectDetector):
         self,
         model_path="models/yolo/yolov8n.pt",
         confidence_threshold=0.40,
+        classification_threshold=0.60,
         device=None,
     ):
         if YOLO is None:
@@ -38,10 +39,19 @@ class YOLODetector(ObjectDetector):
 
         self.model_path = model_path
         self.confidence_threshold = confidence_threshold
+        self.classification_threshold = classification_threshold
         self.device = device
 
         self.model = YOLO(model_path)
         self.class_names = self.model.names
+
+    @property
+    def classification_confidence_threshold(self):
+        return self.classification_threshold
+
+    @classification_confidence_threshold.setter
+    def classification_confidence_threshold(self, value):
+        self.classification_threshold = value
 
     def detect(self, frame):
         """
@@ -92,15 +102,20 @@ class YOLODetector(ObjectDetector):
                 box.cls[0].cpu().item()
             )
 
-            class_name = self.class_names.get(
-                class_id,
-                str(class_id),
-            )
+            if confidence < self.classification_threshold:
+                final_class_id = -1
+                final_class_name = "unknown"
+            else:
+                final_class_id = class_id
+                final_class_name = self.class_names.get(
+                    class_id,
+                    str(class_id),
+                )
 
             detections.append(
                 {
-                    "class_id": class_id,
-                    "class_name": class_name,
+                    "class_id": final_class_id,
+                    "class_name": final_class_name,
                     "confidence": confidence,
                     "bbox": [x1, y1, x2, y2],
                 }

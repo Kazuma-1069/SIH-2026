@@ -94,9 +94,14 @@ class ObjectTracker:
                 if detection_index in matched_detections:
                     continue
 
+                # Allow an existing unknown track (class_id == -1) or unknown detection
+                # to associate by centroid distance rather than rejecting on class mismatch,
+                # while preserving strict class matching between distinct known classes.
                 if (
                     track["class_id"]
                     != detections[detection_index]["class_id"]
+                    and track["class_id"] != -1
+                    and detections[detection_index].get("class_id") != -1
                 ):
                     continue
 
