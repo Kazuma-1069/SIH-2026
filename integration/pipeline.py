@@ -369,20 +369,29 @@ class IntegrationPipeline:
             )
         )
 
+        planner_waypoints = planning_output.get(
+            "waypoints"
+        )
+
         if (
-            self.road_waypoints
-            and planning_output.get(
-                "path_safe",
-                False
+            self.vehicle is not None
+            and isinstance(
+                planner_waypoints,
+                (list, tuple),
             )
-            and planning_output.get(
-                "action"
-            ) != "STOP"
+            and planner_waypoints
         ):
 
             planning_output[
                 "waypoints"
-            ] = self.road_waypoints
+            ] = [
+                self.coordinate_adapter
+                .grid_to_world(
+                    point
+                )
+                for point in planner_waypoints
+            ]
+
         print(
             "\n========== PLANNER DEBUG =========="
         )
