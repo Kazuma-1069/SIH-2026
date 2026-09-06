@@ -33,6 +33,7 @@ class RoadHazard:
     bbox: List[int]
     distance: Optional[float] = None
     position: Optional[List[float]] = None
+    radius: Optional[float] = None
 
     @property
     def center(self):
@@ -108,6 +109,7 @@ class PerceptionOutput:
                     "distance": hazard.distance,
                     "center": hazard.center,
                     "position": hazard.position,
+                    "radius": hazard.radius,
                 }
                 for hazard in self.hazards
             ],

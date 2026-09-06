@@ -288,6 +288,8 @@ def create_system():
         destination=(
             destination_transform.location
         ),
+
+        scenario_manager=scenario_manager,
     )
 
 
@@ -392,6 +394,9 @@ def main():
 
 
         while True:
+
+            if scenario_manager is not None:
+                scenario_manager.update_dynamic_obstacles()
 
 
 
