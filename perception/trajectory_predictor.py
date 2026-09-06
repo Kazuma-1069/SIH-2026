@@ -17,9 +17,22 @@ class TrajectoryPredictor:
         predictions = []
 
         for obj in objects:
-
-            track_id = obj.track_id
-            center = obj.center
+            track_id = (
+                obj.get("track_id", -1)
+                if isinstance(obj, dict)
+                else obj.track_id
+            )
+            center = (
+                obj.get("centroid")
+                if isinstance(obj, dict)
+                else obj.center
+            )
+            if center is None and isinstance(obj, dict):
+                bbox = obj.get("bbox", [0, 0, 0, 0])
+                center = [
+                    (bbox[0] + bbox[2]) / 2.0,
+                    (bbox[1] + bbox[3]) / 2.0,
+                ]
 
             if track_id not in self.history:
                 self.history[track_id] = []
@@ -37,6 +50,11 @@ class TrajectoryPredictor:
                 {
                     "track_id": track_id,
                     "future_position": future,
+                    "velocity": [
+                        future[0] - center[0],
+                        future[1] - center[1],
+                    ],
+                    "horizon_frames": 5,
                 }
             )
 

@@ -3,6 +3,8 @@ from perception.hazard_detector import HazardDetector
 from perception.drivable_space import DrivableSpaceDetector
 from perception.lidar_processor import LidarProcessor
 from perception.sensor_fusion import SensorFusion
+from perception.risk_assessment import RiskAssessor
+from perception.trajectory_predictor import TrajectoryPredictor
 
 from interfaces.perception_output import (
     PerceptionObject,
@@ -40,6 +42,8 @@ class PerceptionPipeline:
         self.drivable_space_detector = DrivableSpaceDetector()
         self.lidar_processor = lidar_processor or LidarProcessor()
         self.sensor_fusion = SensorFusion()
+        self.trajectory_predictor = TrajectoryPredictor()
+        self.risk_assessor = RiskAssessor()
         self.frame_id = 0
 
     def process_frame(self, frame, lidar_points=None):
@@ -91,6 +95,27 @@ class PerceptionPipeline:
             for obj in tracked_objects:
                 obj["distance"] = None
 
+        predictions = self.trajectory_predictor.update(
+            tracked_objects
+        )
+        prediction_by_track = {
+            prediction["track_id"]: prediction
+            for prediction in predictions
+        }
+        for obj in tracked_objects:
+            prediction = prediction_by_track.get(
+                obj["track_id"]
+            )
+            if prediction is not None:
+                obj["predicted_position"] = prediction[
+                    "future_position"
+                ]
+
+        risk_assessments = self.risk_assessor.assess(
+            tracked_objects,
+            image_width=width,
+        )
+
         # 4. Convert to standard interface
         perception_objects = []
 
@@ -119,6 +144,9 @@ class PerceptionPipeline:
                     position=obj.get(
                         "position"
                     ),
+                    velocity=obj.get("velocity"),
+                    predicted_position=obj.get("predicted_position"),
+                    age=int(obj.get("age", 0)),
                 )
             )
 
@@ -133,5 +161,7 @@ class PerceptionPipeline:
     drivable_mask=drivable_mask,
     road_edges=road_edges,
     lidar_obstacles=lidar_obstacles,
+    predictions=predictions,
+    risk_assessments=risk_assessments,
     environment=environment,
 )

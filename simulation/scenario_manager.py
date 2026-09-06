@@ -11,6 +11,13 @@ Supported scenarios:
     - pedestrian
     - construction_barricade
     - indian_road_hazards
+    - human_crossing
+    - bike_ahead
+    - sudden_stopping_car
+    - uneven_road
+    - potholes
+    - combined_indian_road
+    - no_road
     - combined
 
 CARLA version:
@@ -44,6 +51,13 @@ class ScenarioManager:
         "pedestrian",
         "construction_barricade",
         "indian_road_hazards",
+        "human_crossing",
+        "bike_ahead",
+        "sudden_stopping_car",
+        "uneven_road",
+        "potholes",
+        "combined_indian_road",
+        "no_road",
         "combined",
     ]
 
@@ -62,15 +76,107 @@ class ScenarioManager:
         ),
     }
 
+    SCENARIO_CONFIG = {
+        "human_crossing": {
+            "distance_ahead": 20.0,
+            "lateral_offset": -4.0,
+            "target_lateral_offset": 0.0,
+            "speed_mps": 1.5,
+            "crossing_axis": "road_right",
+        },
+        "bike_ahead": {
+            "distance_ahead": 30.0,
+            "lateral_offset": 2.5,
+            "target_lateral_offset": 0.0,
+            "speed_mps": 3.0,
+        },
+        "sudden_stopping_car": {
+            "distance_ahead": 28.0,
+            "lateral_offset": 0.0,
+            "speed_mps": 4.0,
+            "stop_after_seconds": 3.0,
+        },
+        "uneven_road": {
+            "section_start_distance": 18.0,
+            "section_end_distance": 32.0,
+            "positions": (
+                (18.0, 0.0),
+                (22.0, 0.0),
+                (26.0, 0.0),
+            ),
+            "severity": "medium",
+            "obstacles": (
+                {
+                    "type": "pothole",
+                    "distance_ahead": 20.0,
+                    "lateral_offset": -1.0,
+                    "radius": 0.6,
+                },
+                {
+                    "type": "construction_barricade",
+                    "distance_ahead": 28.0,
+                    "lateral_offset": 0.5,
+                    "radius": 1.2,
+                },
+            ),
+        },
+        "combined_indian_road": {
+            "uneven_road": {
+                "positions": (
+                    (18.0, 0.0),
+                    (22.0, 0.0),
+                    (26.0, 0.0),
+                ),
+                "obstacles": (
+                    {
+                        "type": "pothole",
+                        "distance_ahead": 20.0,
+                        "lateral_offset": -1.0,
+                        "radius": 0.6,
+                    },
+                    {
+                        "type": "pothole",
+                        "distance_ahead": 27.0,
+                        "lateral_offset": 1.0,
+                        "radius": 0.6,
+                    },
+                    {
+                        "type": "construction_barricade",
+                        "distance_ahead": 30.0,
+                        "lateral_offset": 0.5,
+                        "radius": 1.2,
+                    },
+                ),
+            },
+            "human_crossing": {
+                "distance_ahead": 22.0,
+                "lateral_offset": -3.5,
+            },
+            "bike_ahead": {
+                "distance_ahead": 26.0,
+                "lateral_offset": 2.0,
+            },
+            "sudden_stopping_car": {
+                "distance_ahead": 30.0,
+                "stop_after_seconds": 3.0,
+            },
+        },
+        "no_road": {
+            "distance_ahead": 34.0,
+            "lateral_offset": 0.0,
+            "radius": 3.5,
+        },
+    }
+
     POTHOLE_POSITIONS = (
-        (24.0, -0.9),
-        (42.0, 0.8),
-        (60.0, -0.6),
+        (20.0, -1.2),
+        (38.0, 1.2),
+        (56.0, -1.0),
     )
 
     INDIAN_ROAD_POTHOLE_POSITIONS = (
-        (24.0, -0.9),
-        (42.0, 0.8),
+        (20.0, -1.2),
+        (38.0, 1.2),
     )
 
     def __init__(
@@ -88,6 +194,8 @@ class ScenarioManager:
 
         self.hazards: List[Dict[str, Any]] = []
         self.actors: List[carla.Actor] = []
+        self.elapsed_seconds = 0.0
+        self.scenario_overrides: Dict[str, Any] = {}
 
         print("[M4] Scenario manager initialized")
 
@@ -102,7 +210,11 @@ class ScenarioManager:
         """
         return list(cls.SUPPORTED_SCENARIOS)
 
-    def set_scenario(self, scenario_name: str) -> bool:
+    def set_scenario(
+        self,
+        scenario_name: str,
+        config_overrides: Optional[Dict[str, Any]] = None,
+    ) -> bool:
         """
         Activate a scenario.
 
@@ -119,6 +231,7 @@ class ScenarioManager:
             )
 
         self.clear_scenario()
+        self.scenario_overrides = dict(config_overrides or {})
 
         self.active_scenario = scenario_name
 
@@ -133,6 +246,31 @@ class ScenarioManager:
 
         elif scenario_name == "indian_road_hazards":
             self._setup_indian_road_hazards()
+
+        elif scenario_name == "human_crossing":
+            self._setup_human_crossing()
+
+        elif scenario_name == "bike_ahead":
+            self._setup_bike_ahead()
+
+        elif scenario_name == "sudden_stopping_car":
+            self._setup_sudden_stopping_car()
+
+        elif scenario_name == "uneven_road":
+            self._setup_uneven_road()
+
+        elif scenario_name == "potholes":
+            self._spawn_potholes(
+                self._configured_pothole_positions(
+                    self.POTHOLE_POSITIONS
+                )
+            )
+
+        elif scenario_name == "combined_indian_road":
+            self._setup_combined_indian_road()
+
+        elif scenario_name == "no_road":
+            self._setup_no_road()
 
         elif scenario_name in self.SCENARIO_HAZARDS:
             self._setup_configured_hazards(
@@ -172,6 +310,29 @@ class ScenarioManager:
 
     def get_hazard_count(self) -> int:
         return len(self.hazards)
+
+    def _scenario_config(self, scenario_name: str) -> Dict[str, Any]:
+        config = dict(self.SCENARIO_CONFIG.get(scenario_name, {}))
+        active_config = self.SCENARIO_CONFIG.get(
+            self.active_scenario,
+            {},
+        )
+        config.update(active_config.get(scenario_name, {}))
+        config.update(self.scenario_overrides)
+        return config
+
+    def _configured_pothole_positions(self, default):
+        positions = self.scenario_overrides.get(
+            "pothole_positions",
+            self.SCENARIO_CONFIG.get(
+                self.active_scenario,
+                {},
+            ).get("pothole_positions", default),
+        )
+        return tuple(
+            (float(distance), float(lateral))
+            for distance, lateral in positions
+        )
 
     def get_destination(self) -> Optional[carla.Location]:
         return self.destination
@@ -384,27 +545,76 @@ class ScenarioManager:
         Called by the simulation loop.
         """
 
+        self.elapsed_seconds += max(0.0, float(delta_seconds))
+
         for hazard in self.hazards:
-            if hazard.get("type") != "dynamic_obstacle":
+            hazard_type = hazard.get("type")
+            if hazard_type not in {
+                "dynamic_obstacle",
+                "human_crossing",
+                "bike_ahead",
+                "sudden_stopping_car",
+            }:
                 continue
 
             actor_id = hazard.get("id")
             actor = self._find_actor(actor_id)
 
             if actor is None:
-                hazard["active"] = False
+                if hazard_type == "dynamic_obstacle":
+                    hazard["active"] = False
+                else:
+                    hazard["active"] = True
+                    hazard["motion_unavailable"] = True
+                continue
+
+            if (
+                hazard_type == "sudden_stopping_car"
+                and self.elapsed_seconds >= float(
+                    hazard.get("stop_after_seconds", 3.0)
+                )
+            ):
+                hazard["speed"] = 0.0
+                hazard["stopped"] = True
                 continue
 
             speed = float(hazard.get("speed", 4.0))
 
             transform = actor.get_transform()
-            forward = transform.get_forward_vector()
-
-            new_location = transform.location + carla.Location(
-                x=forward.x * speed * delta_seconds,
-                y=forward.y * speed * delta_seconds,
-                z=0.0,
-            )
+            if hazard_type in {"human_crossing", "bike_ahead"}:
+                current_lateral = float(
+                    hazard.get("lateral_offset", 0.0)
+                )
+                target_lateral = float(
+                    hazard.get("target_lateral_offset", 0.0)
+                )
+                direction = 1.0 if target_lateral > current_lateral else -1.0
+                lateral_step = min(
+                    abs(target_lateral - current_lateral),
+                    speed * delta_seconds,
+                )
+                crossing_axis = hazard.get(
+                    "crossing_axis_vector",
+                    [
+                        transform.get_right_vector().x,
+                        transform.get_right_vector().y,
+                    ],
+                )
+                new_location = transform.location + carla.Location(
+                    x=crossing_axis[0] * direction * lateral_step,
+                    y=crossing_axis[1] * direction * lateral_step,
+                    z=0.0,
+                )
+                hazard["lateral_offset"] = (
+                    current_lateral + direction * lateral_step
+                )
+            else:
+                forward = transform.get_forward_vector()
+                new_location = transform.location + carla.Location(
+                    x=forward.x * speed * delta_seconds,
+                    y=forward.y * speed * delta_seconds,
+                    z=0.0,
+                )
 
             actor.set_transform(
                 carla.Transform(
@@ -418,6 +628,259 @@ class ScenarioManager:
                 "y": new_location.y,
                 "z": new_location.z,
             }
+
+    def _spawn_actor_hazard(
+        self,
+        hazard_type: str,
+        blueprint_filters,
+        config,
+        severity: str,
+        dynamic: bool = True,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        transform = self._hazard_transform(
+            config["distance_ahead"],
+            config.get("lateral_offset", 0.0),
+        )
+        if transform is None:
+            return
+
+        blueprints = []
+        for blueprint_filter in blueprint_filters:
+            blueprints.extend(
+                self.world.get_blueprint_library().filter(
+                    blueprint_filter
+                )
+            )
+        blueprints = sorted(
+            blueprints,
+            key=lambda blueprint_item: blueprint_item.id,
+        )
+        actor = (
+            self.world.try_spawn_actor(blueprints[0], transform)
+            if blueprints
+            else None
+        )
+        if actor is not None and hasattr(actor, "set_simulate_physics"):
+            actor.set_simulate_physics(False)
+        if hazard_type in {"human_crossing", "bike_ahead"}:
+            right = transform.get_right_vector()
+            metadata = {
+                **(metadata or {}),
+                "crossing_axis_vector": [right.x, right.y],
+            }
+        self._record_hazard(
+            hazard_type,
+            actor,
+            transform,
+            config["distance_ahead"],
+            config.get("lateral_offset", 0.0),
+            severity,
+            dynamic,
+            metadata=metadata,
+        )
+
+    def _setup_human_crossing(self) -> None:
+        config = self._scenario_config("human_crossing")
+        self._spawn_actor_hazard(
+            "human_crossing",
+            ("walker.pedestrian.*",),
+            config,
+            "high",
+            metadata={
+                "speed": config["speed_mps"],
+                "target_lateral_offset": config[
+                    "target_lateral_offset"
+                ],
+                "crossing_axis": config["crossing_axis"],
+                "radius": 1.0,
+            },
+        )
+
+    def _setup_bike_ahead(self) -> None:
+        config = self._scenario_config("bike_ahead")
+        self._spawn_actor_hazard(
+            "bike_ahead",
+            ("vehicle.*motorcycle*", "vehicle.*bicycle*"),
+            config,
+            "high",
+            metadata={
+                "speed": config["speed_mps"],
+                "target_lateral_offset": config[
+                    "target_lateral_offset"
+                ],
+                "radius": 1.5,
+            },
+        )
+
+    def _setup_sudden_stopping_car(self) -> None:
+        config = self._scenario_config("sudden_stopping_car")
+        self._spawn_actor_hazard(
+            "sudden_stopping_car",
+            ("vehicle.*",),
+            config,
+            "high",
+            metadata={
+                "speed": config["speed_mps"],
+                "stop_after_seconds": config[
+                    "stop_after_seconds"
+                ],
+                "stopped": False,
+                "radius": 2.0,
+            },
+        )
+
+    def _record_virtual_hazard(
+        self,
+        hazard_type: str,
+        distance_ahead: float,
+        lateral_offset: float,
+        severity: str,
+        radius: float,
+        transform: Optional[carla.Transform] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if transform is None:
+            transform = self._hazard_transform(
+                distance_ahead,
+                lateral_offset,
+            )
+        if transform is None:
+            return
+
+        self._record_hazard(
+            hazard_type,
+            actor=None,
+            transform=transform,
+            distance_ahead=distance_ahead,
+            lateral_offset=lateral_offset,
+            severity=severity,
+            dynamic=False,
+            metadata={
+                "radius": radius,
+                **(metadata or {}),
+            },
+        )
+
+    def _setup_uneven_road(self) -> None:
+        config = self._scenario_config("uneven_road")
+        blueprint = None
+        try:
+            blueprint = self.world.get_blueprint_library().find(
+                "static.prop.dirtdebris01"
+            )
+        except Exception:
+            pass
+
+        for distance_ahead, lateral_offset in config["positions"]:
+            transform = self._hazard_transform(
+                distance_ahead,
+                lateral_offset,
+            )
+            if transform is None:
+                continue
+            actor = (
+                self.world.try_spawn_actor(blueprint, transform)
+                if blueprint is not None
+                else None
+            )
+            self._record_hazard(
+                "uneven_road",
+                actor,
+                transform,
+                distance_ahead,
+                lateral_offset,
+                config.get("severity", "medium"),
+                metadata={
+                    "radius": 1.0,
+                    "height_m": 0.12,
+                    "on_uneven_road": True,
+                    "uneven_section_start": config[
+                        "section_start_distance"
+                    ],
+                    "uneven_section_end": config[
+                        "section_end_distance"
+                    ],
+                },
+            )
+
+        for obstacle in config.get("obstacles", ()):
+            self._spawn_uneven_section_obstacle(obstacle, config)
+
+    def _spawn_uneven_section_obstacle(
+        self,
+        obstacle: Dict[str, Any],
+        section_config: Dict[str, Any],
+    ) -> None:
+        obstacle_type = obstacle["type"]
+        distance_ahead = float(obstacle["distance_ahead"])
+        lateral_offset = float(obstacle.get("lateral_offset", 0.0))
+        metadata = {
+            "radius": float(obstacle.get("radius", 1.0)),
+            "on_uneven_road": True,
+            "uneven_section_start": section_config[
+                "section_start_distance"
+            ],
+            "uneven_section_end": section_config[
+                "section_end_distance"
+            ],
+        }
+
+        if obstacle_type == "pothole":
+            self._record_virtual_hazard(
+                "pothole",
+                distance_ahead,
+                lateral_offset,
+                "medium",
+                metadata["radius"],
+                metadata=metadata,
+            )
+            return
+
+        blueprint_filters = {
+            "construction_barricade": (
+                "static.prop.streetbarrier",
+            ),
+            "parked_vehicle": ("vehicle.*",),
+        }.get(obstacle_type)
+        if blueprint_filters is None:
+            raise ValueError(
+                f"Unsupported uneven-road obstacle: {obstacle_type}"
+            )
+
+        self._spawn_actor_hazard(
+            obstacle_type,
+            blueprint_filters,
+            {
+                "distance_ahead": distance_ahead,
+                "lateral_offset": lateral_offset,
+            },
+            "high",
+            dynamic=False,
+            metadata=metadata,
+        )
+
+    def _setup_no_road(self) -> None:
+        config = self._scenario_config("no_road")
+        self._record_virtual_hazard(
+            "no_road",
+            config["distance_ahead"],
+            config["lateral_offset"],
+            "high",
+            config["radius"],
+            metadata={"road_continuation": False},
+        )
+
+    def _setup_combined_indian_road(self) -> None:
+        self._setup_uneven_road()
+        self._setup_human_crossing()
+        self._setup_bike_ahead()
+        self._setup_sudden_stopping_car()
+
+        for hazard in self.hazards:
+            hazard.setdefault("on_uneven_road", True)
+            hazard.setdefault("uneven_section_start", 18.0)
+            hazard.setdefault("uneven_section_end", 32.0)
 
     # ============================================================
     # POTHOLE
@@ -490,12 +953,12 @@ class ScenarioManager:
         lateral_offset: float,
         severity: str,
         dynamic: bool = False,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         if actor is not None:
             self.actors.append(actor)
 
-        self.hazards.append(
-            {
+        hazard = {
                 "id": actor.id if actor is not None else None,
                 "type": hazard_type,
                 "location": self._location_to_dict(transform.location),
@@ -503,20 +966,28 @@ class ScenarioManager:
                 "lateral_offset": lateral_offset,
                 "severity": severity,
                 "dynamic": dynamic,
-                "active": actor is not None,
+                # The hazard description remains usable by the simulation
+                # bridge even when its optional visual actor cannot spawn.
+                "active": True,
             }
-        )
+        if metadata:
+            hazard.update(metadata)
+        self.hazards.append(hazard)
 
     def _spawn_pothole(self) -> None:
-        self._spawn_potholes(self.POTHOLE_POSITIONS)
+        self._spawn_potholes(
+            self._configured_pothole_positions(
+                self.POTHOLE_POSITIONS
+            )
+        )
 
     def _spawn_potholes(self, positions) -> None:
         blueprint_library = self.world.get_blueprint_library()
+        blueprint = None
         try:
             blueprint = blueprint_library.find("static.prop.dirtdebris01")
         except Exception as exc:
             print(f"[M4] Pothole asset unavailable: {exc}")
-            return
 
         for distance_ahead, lateral_offset in positions:
             transform = self._hazard_transform(
@@ -526,7 +997,11 @@ class ScenarioManager:
             if transform is None:
                 continue
 
-            actor = self.world.try_spawn_actor(blueprint, transform)
+            actor = (
+                self.world.try_spawn_actor(blueprint, transform)
+                if blueprint is not None
+                else None
+            )
             self._record_hazard(
                 "pothole",
                 actor,
@@ -639,7 +1114,11 @@ class ScenarioManager:
     def _setup_indian_road_hazards(self) -> None:
         """Spawn the deterministic set of physical Indian road hazards."""
 
-        self._spawn_potholes(self.INDIAN_ROAD_POTHOLE_POSITIONS)
+        self._spawn_potholes(
+            self._configured_pothole_positions(
+                self.INDIAN_ROAD_POTHOLE_POSITIONS
+            )
+        )
         self._spawn_parked_vehicle_at(30.0, 2.0)
         self._spawn_pedestrian_at(22.0, 1.5)
         self._spawn_construction_barricade_at(36.0, -2.0)
@@ -806,6 +1285,7 @@ class ScenarioManager:
 
         self.hazards = []
         self.active_scenario = "normal"
+        self.elapsed_seconds = 0.0
 
     def destroy(self) -> None:
         """

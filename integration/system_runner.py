@@ -34,6 +34,15 @@ sys.path.insert(
 import time
 import cv2
 
+carla_python_api = os.path.join(
+    os.environ.get(
+        "CARLA_PYTHON_API",
+        r"C:\CARLA_0.9.16\PythonAPI\carla",
+    )
+)
+if os.path.isdir(carla_python_api) and carla_python_api not in sys.path:
+    sys.path.insert(0, carla_python_api)
+
 
 from simulation.destination_manager import (
     DestinationManager

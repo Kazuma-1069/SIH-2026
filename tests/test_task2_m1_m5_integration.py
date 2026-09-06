@@ -4,6 +4,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from integration.pipeline import IntegrationPipeline
+from planning.coordinate_adapter import CoordinateAdapter
 from planning.planner import Planner
 from simulation.controller import VehicleController
 from interfaces.perception_output import PerceptionOutput
@@ -256,3 +257,95 @@ def test_no_safe_path_commands_emergency_stop():
     assert control["throttle"] == 0.0
     assert control["steer"] == 0.0
     assert control["brake"] == 1.0
+
+
+def test_planner_stops_when_live_route_is_unavailable():
+    output = Planner(width=20, height=20).plan(
+        {
+            "primary_objects": [],
+            "fallback_anomalies": [],
+            "drivable_space": {},
+            "confidence_uncertainty": {},
+            "ego_position": [0, 0],
+            "goal": [10, 0],
+            "require_road_route": True,
+        }
+    )
+
+    assert output["action"] == "STOP"
+    assert output["safety_reason"] == "NO_VALID_ROAD_ROUTE"
+    assert output["waypoints"] == []
+
+
+def test_planner_rejects_unvalidated_off_road_replan():
+    planner = Planner(width=20, height=20)
+    straight_path = [[index, 0] for index in range(7)]
+
+    planner.plan(
+        {
+            "primary_objects": [],
+            "fallback_anomalies": [],
+            "drivable_space": {},
+            "confidence_uncertainty": {},
+            "ego_position": [0, 0],
+            "goal": [6, 0],
+            "current_path": straight_path,
+        }
+    )
+    output = planner.plan(
+        {
+            "primary_objects": [
+                {"position": [3, 0], "radius": 1},
+            ],
+            "fallback_anomalies": [],
+            "drivable_space": {},
+            "confidence_uncertainty": {},
+            "ego_position": [0, 0],
+            "goal": [6, 0],
+            "current_path": straight_path,
+        }
+    )
+
+    assert output["action"] == "STOP"
+    assert output["path_safe"] is False
+    assert output["safety_reason"] == "NO_SAFE_ROAD_DETOUR"
+    assert output["waypoints"] == []
+
+
+def test_coordinate_adapter_uses_route_origin_for_large_world_coords():
+    adapter = CoordinateAdapter()
+    adapter.set_origin([335.0, 128.0])
+
+    grid_point = adapter.world_to_grid([340.0, 128.0])
+    world_point = adapter.grid_to_world(grid_point)
+
+    assert grid_point == [1, 0]
+    assert world_point == [340.0, 128.0]
+
+
+def test_global_route_waypoints_preserved_at_large_carla_coordinates():
+    route = [
+        FakeLocation(335.0, 128.0),
+        FakeLocation(340.0, 128.0),
+        FakeLocation(345.0, 133.0),
+    ]
+    vehicle = FakeVehicle(
+        location=(335.0, 128.0),
+        destination=(345.0, 133.0),
+        route=route,
+    )
+    pipeline = _make_pipeline(
+        Planner(width=20, height=20),
+        vehicle=vehicle,
+    )
+
+    _, planning_output, control_command = pipeline.process_frame(object())
+
+    assert planning_output["algorithm"] == "CURRENT_PATH"
+    assert planning_output["waypoints"] == [
+        [335.0, 128.0],
+        [340.0, 128.0],
+        [345.0, 133.0],
+    ]
+    assert control_command is not None
+    assert abs(control_command["steer"]) < 0.3

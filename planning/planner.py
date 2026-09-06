@@ -126,6 +126,11 @@ class Planner:
             {}
         )
 
+        risk_assessments = perception_data.get(
+            "risk_assessments",
+            [],
+        )
+
         # Combine all perceived hazards.
         hazards = primary_objects + fallback_anomalies
 
@@ -152,6 +157,26 @@ class Planner:
         )
 
         start = ego_position
+
+        if (
+            perception_data.get("require_road_route", False)
+            and not perception_data.get("route_waypoints")
+        ):
+            self.current_path = []
+            return {
+                "action": "STOP",
+                "target_speed_mps": 0.0,
+                "algorithm": "SAFETY_STOP",
+                "hazard_count": len(hazards),
+                "waypoints": [],
+                "path_safe": False,
+                "safety_reason": "NO_VALID_ROAD_ROUTE",
+                "confidence_uncertainty": confidence,
+                "replanned": False,
+                "current_path_blocked": False,
+                "replan_count": self.replan_count,
+                "destination": list(goal),
+            }
 
         # Check if the currently active route is blocked before
         # evaluating the bubble shield emergency state.
@@ -212,6 +237,79 @@ class Planner:
         current_path_blocked = (
             self._is_current_path_blocked()
         )
+
+        predicted_path_conflict = any(
+            assessment.get("path_conflict", False)
+            and assessment.get("risk_level") in {
+                "high",
+                "critical",
+            }
+            for assessment in risk_assessments
+            if isinstance(assessment, dict)
+        )
+
+        if predicted_path_conflict and not current_path_blocked:
+            self.current_path = []
+            return {
+                "action": "STOP",
+                "target_speed_mps": 0.0,
+                "algorithm": "RISK_ASSESSMENT",
+                "hazard_count": len(hazards),
+                "waypoints": [],
+                "path_safe": False,
+                "safety_reason": "PREDICTED_PATH_CONFLICT",
+                "confidence_uncertainty": confidence,
+                "replanned": False,
+                "current_path_blocked": current_path_blocked,
+                "replan_count": self.replan_count,
+                "destination": list(goal),
+                "risk_assessments": risk_assessments,
+                "bubble_safe": bubble_result["safe"],
+                "bubble_emergency": bubble_result["emergency"],
+                "bubble_distance": bubble_result["distance"],
+                "bubble_reason": bubble_result["reason"],
+            }
+
+        # The current stack has no drivable-road mask for local replanning.
+        # Do not send an unconstrained grid detour to the vehicle controller.
+        if current_path_blocked:
+            candidate_path, algorithm = self._find_path(
+                start,
+                goal,
+            )
+            self.current_path = []
+            self.replan_count += 1
+
+            if not candidate_path:
+                return {
+                    "action": "STOP",
+                    "target_speed_mps": 0.0,
+                    "algorithm": algorithm,
+                    "hazard_count": len(hazards),
+                    "waypoints": [],
+                    "path_safe": False,
+                    "safety_reason": "NO_PATH_FOUND",
+                    "confidence_uncertainty": confidence,
+                    "replanned": True,
+                    "current_path_blocked": True,
+                    "replan_count": self.replan_count,
+                    "destination": list(goal),
+                }
+
+            return {
+                "action": "STOP",
+                "target_speed_mps": 0.0,
+                "algorithm": "SAFETY_STOP",
+                "hazard_count": len(hazards),
+                "waypoints": [],
+                "path_safe": False,
+                "safety_reason": "NO_SAFE_ROAD_DETOUR",
+                "confidence_uncertainty": confidence,
+                "replanned": True,
+                "current_path_blocked": True,
+                "replan_count": self.replan_count,
+                "destination": list(goal),
+            }
 
         # A fresh hazard with no active path also requires
         # obstacle-aware planning.
@@ -360,6 +458,7 @@ class Planner:
             "path_safe": safety_result["safe"],
             "safety_reason": safety_result["reason"],
             "confidence_uncertainty": confidence,
+            "risk_assessments": risk_assessments,
 
             # Dynamic replanning information.
             "replanned": replanning_required,

@@ -1,8 +1,6 @@
 from simulation.controller import VehicleController
 
 
-
-=======
 def test_stop_command():
     controller = VehicleController()
 
@@ -29,7 +27,6 @@ def test_forward_command():
     )
 
     assert output["throttle"] > 0
-<<<<<<< HEAD
     assert output["brake"] == 0.0
 
 
@@ -46,6 +43,19 @@ def test_emergency_stop():
 
     assert output["throttle"] == 0.0
     assert output["brake"] == 1.0
-=======
-    
+def test_controller_stops_when_all_waypoints_are_behind_vehicle():
+    controller = VehicleController()
 
+    output = controller.compute_control(
+        {
+            "action": "PROCEED_FORWARD",
+            "target_speed_mps": 5.0,
+            "path_safe": True,
+            "waypoints": [[-5.0, 0.0]],
+        },
+        vehicle_location=[0.0, 0.0],
+        vehicle_heading=0.0,
+    )
+
+    assert output["throttle"] == 0.0
+    assert output["brake"] == 1.0

@@ -2,6 +2,9 @@ class CoordinateAdapter:
     """
     Converts CARLA world coordinates
     into planner grid coordinates.
+
+    Uses a route origin so large CARLA map coordinates are mapped into
+    a local grid window instead of being clamped near (0, 0).
     """
 
     def __init__(
@@ -14,6 +17,25 @@ class CoordinateAdapter:
         self.scale = scale
         self.grid_width = grid_width
         self.grid_height = grid_height
+        self.origin = None
+
+
+    def set_origin(
+        self,
+        location,
+    ):
+        self.origin = [
+            float(location[0]),
+            float(location[1]),
+        ]
+
+
+    def _ensure_origin(
+        self,
+        location,
+    ):
+        if self.origin is None:
+            self.set_origin(location)
 
 
     def world_to_grid(
@@ -28,12 +50,16 @@ class CoordinateAdapter:
             planner grid coordinate
         """
 
+        self._ensure_origin(location)
+
         x = int(
-            location[0] / self.scale
+            (location[0] - self.origin[0])
+            / self.scale
         )
 
         y = int(
-            location[1] / self.scale
+            (location[1] - self.origin[1])
+            / self.scale
         )
 
 
@@ -65,7 +91,15 @@ class CoordinateAdapter:
         point,
     ):
 
+        if self.origin is None:
+            return [
+                point[0] * self.scale,
+                point[1] * self.scale,
+            ]
+
         return [
-            point[0] * self.scale,
-            point[1] * self.scale,
+            self.origin[0]
+            + point[0] * self.scale,
+            self.origin[1]
+            + point[1] * self.scale,
         ]

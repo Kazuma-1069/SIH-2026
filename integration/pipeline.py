@@ -30,11 +30,8 @@ from planning.coordinate_adapter import (
     CoordinateAdapter
 )
 
+import importlib
 import math
-
-
-from integration.data_adapter import perception_to_planning_input
-from simulation.controller import VehicleController
 
 
 class IntegrationPipeline:
@@ -64,7 +61,6 @@ class IntegrationPipeline:
 
         # M3
         self.dashboard = dashboard
-        self.controller = VehicleController()
 
         # M4 VehicleManager
         self.vehicle = vehicle
@@ -115,6 +111,7 @@ class IntegrationPipeline:
         if not bridged_hazards:
             return perception_output
 
+        # Merge with existing perception hazards
         perception_output.hazards = (
             list(perception_output.hazards)
             + bridged_hazards
@@ -145,6 +142,32 @@ class IntegrationPipeline:
             return []
 
         carla_map = world.get_map()
+
+        try:
+            route_planner_module = importlib.import_module(
+                "agents.navigation.global_route_planner"
+            )
+            GlobalRoutePlanner = (
+                route_planner_module.GlobalRoutePlanner
+            )
+
+            route_planner = GlobalRoutePlanner(
+                carla_map,
+                sampling_resolution=2.0,
+            )
+            traced_route = route_planner.trace_route(
+                start_location,
+                self.destination,
+            )
+            route_locations = [
+                [waypoint.transform.location.x,
+                 waypoint.transform.location.y]
+                for waypoint, _ in traced_route
+            ]
+            if route_locations:
+                return route_locations
+        except Exception as exc:
+            print(f"[M0] GlobalRoutePlanner unavailable: {exc}")
 
         start_waypoint = carla_map.get_waypoint(
             start_location
@@ -333,6 +356,13 @@ class IntegrationPipeline:
                 if self.road_waypoints is None:
                     route = []
 
+                    self.coordinate_adapter.set_origin(
+                        [
+                            location.x,
+                            location.y,
+                        ]
+                    )
+
                     if hasattr(
                         self.vehicle,
                         "generate_route",
@@ -381,6 +411,19 @@ class IntegrationPipeline:
                             point
                         ) for point in route
                     ]
+
+                planning_input[
+                    "require_road_route"
+                ] = True
+
+
+            # Keep perception positions in vehicle-relative meters. The
+            # planner map receives an explicit grid projection instead.
+            self._add_planner_grid_positions(
+                planning_input,
+                location,
+                vehicle_heading,
+            )
 
 
 
@@ -441,15 +484,22 @@ class IntegrationPipeline:
             and planner_waypoints
         ):
 
-            planning_output[
-                "waypoints"
-            ] = [
-                self.coordinate_adapter
-                .grid_to_world(
-                    point
-                )
-                for point in planner_waypoints
-            ]
+            # Use the stored global road waypoints only when the planner is simply following the current path without replanning.
+            # When a replanned safe detour is generated (replanned=True) we must keep the planner‑provided waypoints.
+            following_global_route = (
+                planning_output.get("algorithm") == "CURRENT_PATH"
+                and not planning_output.get("replanned", False)
+                and planning_output.get("action") == "PROCEED_FORWARD"
+                and self.road_waypoints
+            )
+
+            if following_global_route:
+                planning_output["waypoints"] = list(self.road_waypoints)
+            else:
+                planning_output["waypoints"] = [
+                    self.coordinate_adapter.grid_to_world(point)
+                    for point in planner_waypoints
+                ]
 
         print(
             "\n========== PLANNER DEBUG =========="
@@ -463,7 +513,6 @@ class IntegrationPipeline:
             planning_input
         )
 
-<<<<<<< HEAD
         print(
             "PLANNING OUTPUT:"
         )
@@ -512,23 +561,6 @@ class IntegrationPipeline:
                     vehicle_location,
                     vehicle_heading,
                 )
-=======
-        # M5
-        control_command = (
-            self.controller.compute_control(
-                planning_output
-            )
-        )
-
-        # M3
-        if self.dashboard is not None:
-            self.dashboard.render(
-                perception_output=perception_output,
-                planning_output=planning_output,
-                camera_frame=frame,
-                show=show,
-                save_path=save_path,
->>>>>>> d58e2256777630ae62c8c2eadc284e68ee816a36
             )
 
 
@@ -607,11 +639,45 @@ class IntegrationPipeline:
             perception_output,
 
             planning_output,
-<<<<<<< HEAD
-
             control_command,
-
-=======
-            control_command,
->>>>>>> d58e2256777630ae62c8c2eadc284e68ee816a36
         )
+
+    def _add_planner_grid_positions(
+        self,
+        planning_input,
+        ego_location,
+        ego_heading,
+    ):
+        """Project vehicle-relative metric hazards into the planner grid."""
+
+        if ego_heading is None:
+            return
+
+        yaw_rad = math.radians(ego_heading)
+        forward_x = math.cos(yaw_rad)
+        forward_y = math.sin(yaw_rad)
+        right_x = -math.sin(yaw_rad)
+        right_y = math.cos(yaw_rad)
+
+        for collection_name in (
+            "primary_objects",
+            "fallback_anomalies",
+        ):
+            for obstacle in planning_input.get(collection_name, []):
+                if not obstacle.get("vehicle_relative", False):
+                    continue
+
+                forward_distance, lateral_offset = obstacle["position"]
+                world_position = [
+                    ego_location.x
+                    + forward_distance * forward_x
+                    + lateral_offset * right_x,
+                    ego_location.y
+                    + forward_distance * forward_y
+                    + lateral_offset * right_y,
+                ]
+                obstacle["grid_position"] = (
+                    self.coordinate_adapter.world_to_grid(
+                        world_position
+                    )
+                )

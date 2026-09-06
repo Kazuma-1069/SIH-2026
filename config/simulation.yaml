@@ -1,1 +1,53 @@
-# Simulation configuration
+# Deterministic M4 scenario configuration.
+# Positions use forward meters and positive lateral meters are right.
+scenarios:
+	human_crossing:
+		distance_ahead: 20.0
+		lateral_offset: -4.0
+		target_lateral_offset: 0.0
+		speed_mps: 1.5
+	bike_ahead:
+		distance_ahead: 30.0
+		lateral_offset: 2.5
+		target_lateral_offset: 0.0
+		speed_mps: 3.0
+	sudden_stopping_car:
+		distance_ahead: 28.0
+		lateral_offset: 0.0
+		speed_mps: 4.0
+		stop_after_seconds: 3.0
+	uneven_road:
+		section_start_distance: 18.0
+		section_end_distance: 32.0
+		positions:
+			- [18.0, 0.0]
+			- [22.0, 0.0]
+			- [26.0, 0.0]
+		obstacles:
+			- type: pothole
+				distance_ahead: 20.0
+				lateral_offset: -1.0
+				radius: 0.6
+			- type: construction_barricade
+				distance_ahead: 28.0
+				lateral_offset: 0.5
+				radius: 1.2
+	combined_indian_road:
+		uneven_road:
+			obstacles:
+				- type: pothole
+					distance_ahead: 20.0
+					lateral_offset: -1.0
+					radius: 0.6
+				- type: pothole
+					distance_ahead: 27.0
+					lateral_offset: 1.0
+					radius: 0.6
+				- type: construction_barricade
+					distance_ahead: 30.0
+					lateral_offset: 0.5
+					radius: 1.2
+	no_road:
+		distance_ahead: 34.0
+		lateral_offset: 0.0
+		radius: 3.5

@@ -19,6 +19,10 @@ class EvaluationMetrics:
     path_length: float = 0.0
     max_speed: float = 0.0
     average_speed: float = 0.0
+    braking_events: int = 0
+    control_stability: float = 1.0
+    detection_latency: float = 0.0
+    replanning_latency: float = 0.0
     notes: List[str] = field(default_factory=list)
 
 
@@ -32,6 +36,12 @@ class EvaluationTracker:
         self._last_location = None
         self._distance = 0.0
         self._speed_samples = []
+        self._braking_events = 0
+        self._steering_change_sum = 0.0
+        self._control_samples = 0
+        self._last_steer = None
+        self._detection_latency_samples = []
+        self._replanning_latency_samples = []
 
     def start(self):
         self._start_time = time.perf_counter()
@@ -74,6 +84,41 @@ class EvaluationTracker:
     def record_safety_violation(self):
         self.metrics.safety_violations += 1
 
+    def record_control(self, control_output):
+        """Record braking and steering stability from an M5 command."""
+
+        if control_output is None:
+            return
+
+        if isinstance(control_output, dict):
+            brake = float(control_output.get("brake", 0.0))
+            steer = float(
+                control_output.get(
+                    "steer",
+                    control_output.get("steering", 0.0),
+                )
+            )
+        else:
+            brake = float(getattr(control_output, "brake", 0.0))
+            steer = float(getattr(control_output, "steer", 0.0))
+
+        if brake > 0.1:
+            self._braking_events += 1
+        if self._last_steer is not None:
+            self._steering_change_sum += abs(steer - self._last_steer)
+        self._last_steer = steer
+        self._control_samples += 1
+
+    def record_detection_latency(self, latency_seconds: float):
+        self._detection_latency_samples.append(
+            max(0.0, float(latency_seconds))
+        )
+
+    def record_replanning_latency(self, latency_seconds: float):
+        self._replanning_latency_samples.append(
+            max(0.0, float(latency_seconds))
+        )
+
     def finish(self, destination_reached=False):
         self.metrics.destination_reached = destination_reached
 
@@ -88,6 +133,26 @@ class EvaluationTracker:
             self.metrics.average_speed = (
                 sum(self._speed_samples)
                 / len(self._speed_samples)
+            )
+
+        self.metrics.braking_events = self._braking_events
+        mean_steering_change = (
+            self._steering_change_sum / self._control_samples
+            if self._control_samples
+            else 0.0
+        )
+        self.metrics.control_stability = 1.0 / (
+            1.0 + mean_steering_change
+        )
+        if self._detection_latency_samples:
+            self.metrics.detection_latency = (
+                sum(self._detection_latency_samples)
+                / len(self._detection_latency_samples)
+            )
+        if self._replanning_latency_samples:
+            self.metrics.replanning_latency = (
+                sum(self._replanning_latency_samples)
+                / len(self._replanning_latency_samples)
             )
 
         return self.metrics
@@ -117,6 +182,14 @@ class EvaluationTracker:
                 round(self.metrics.max_speed, 3),
             "average_speed_mps":
                 round(self.metrics.average_speed, 3),
+            "braking_events":
+                self.metrics.braking_events,
+            "control_stability":
+                round(self.metrics.control_stability, 3),
+            "detection_latency_s":
+                round(self.metrics.detection_latency, 4),
+            "replanning_latency_s":
+                round(self.metrics.replanning_latency, 4),
             "notes":
                 self.metrics.notes,
         }

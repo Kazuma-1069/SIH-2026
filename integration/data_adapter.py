@@ -105,6 +105,11 @@ def perception_to_planning_input(
         lidar_obstacles = (
             perception_output.lidar_obstacles
         )
+        risk_assessments = getattr(
+            perception_output,
+            "risk_assessments",
+            [],
+        )
 
     elif isinstance(
         perception_output,
@@ -132,6 +137,10 @@ def perception_to_planning_input(
                 "lidar_obstacles",
                 []
             )
+        )
+        risk_assessments = perception_output.get(
+            "risk_assessments",
+            [],
         )
 
     else:
@@ -165,6 +174,8 @@ def perception_to_planning_input(
             confidence = float(obj.get("confidence", 0.0))
             distance = obj.get("distance")
             radius = float(obj.get("radius", 1.0))
+            velocity = obj.get("velocity")
+            predicted_raw = obj.get("predicted_position")
 
         else:
             bbox = list(obj.bbox)
@@ -175,6 +186,8 @@ def perception_to_planning_input(
             confidence = float(obj.confidence)
             distance = getattr(obj, "distance", None)
             radius = getattr(obj, "radius", 1.0)
+            velocity = getattr(obj, "velocity", None)
+            predicted_raw = getattr(obj, "predicted_position", None)
 
         pixel_center = None
         if len(bbox) == 4:
@@ -217,6 +230,8 @@ def perception_to_planning_input(
                 "position": position,
                 "radius": radius,
                 "vehicle_relative": True,
+                "velocity": velocity,
+                "predicted_position": predicted_raw,
             }
         )
 
@@ -229,6 +244,8 @@ def perception_to_planning_input(
                 "position": position,
                 "radius": radius,
                 "vehicle_relative": True,
+                "velocity": velocity,
+                "predicted_position": predicted_raw,
             }
         )
 
@@ -254,6 +271,7 @@ def perception_to_planning_input(
             h_conf = float(hazard.get("confidence", 0.0))
             h_raw_pos = hazard.get("position")
             h_radius = float(hazard.get("radius", 0.5))
+            h_metadata = hazard.get("metadata")
         else:
             h_bbox = list(hazard.bbox)
             h_dist = getattr(hazard, "distance", None)
@@ -261,6 +279,7 @@ def perception_to_planning_input(
             h_conf = float(hazard.confidence)
             h_raw_pos = getattr(hazard, "position", None)
             h_radius = getattr(hazard, "radius", 0.5)
+            h_metadata = getattr(hazard, "metadata", None)
 
         h_pixel_center = None
         if len(h_bbox) == 4:
@@ -300,6 +319,7 @@ def perception_to_planning_input(
                 "position": h_pos,
                 "radius": h_radius,
                 "vehicle_relative": True,
+                "metadata": h_metadata,
             }
         )
 
@@ -319,6 +339,12 @@ def perception_to_planning_input(
 
         "obstacle_positions":
             obstacle_positions,
+
+        "predictions": perception_output.get("predictions", [])
+        if isinstance(perception_output, dict)
+        else getattr(perception_output, "predictions", []),
+
+        "risk_assessments": risk_assessments,
 
         "drivable_space":
             {

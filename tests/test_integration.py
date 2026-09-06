@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 import sys
 import os
 
@@ -12,17 +11,10 @@ sys.path.insert(
     )
 )
 from simulation.controller import VehicleController
-<<<<<<< HEAD
-=======
->>>>>>> d58e2256777630ae62c8c2eadc284e68ee816a36
-from integration.data_adapter import perception_to_planning_input
-from integration.pipeline import IntegrationPipeline
-=======
 from integration.data_adapter import (
     perception_to_planning_input,
     pixel_to_vehicle_coords,
 )
->>>>>>> 61c688ba37e6e2fc4eefd1900c38c65a869ef9c0
 from interfaces.perception_output import (
     PerceptionOutput,
     PerceptionObject,
@@ -112,16 +104,9 @@ def test_integration_pipeline_m2_to_m1():
 
     frame = object()
 
-<<<<<<< HEAD
     perception_output, planning_output, control_command = pipeline.process_frame(
     frame
 )
-=======
-    perception_output, planning_output, control_command = (
-    pipeline.process_frame(frame)
-)
-
->>>>>>> d58e2256777630ae62c8c2eadc284e68ee816a36
     assert isinstance(perception_output, PerceptionOutput)
     assert control_command is not None
     assert control_command["throttle"] > 0

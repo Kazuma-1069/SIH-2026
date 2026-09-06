@@ -24,6 +24,11 @@ SUPPORTED_HAZARD_TYPES = {
     "parked_vehicle",
     "pedestrian",
     "construction_barricade",
+    "human_crossing",
+    "bike_ahead",
+    "sudden_stopping_car",
+    "uneven_road",
+    "no_road",
 }
 
 HAZARD_TYPE_ALIASES = {
@@ -36,6 +41,11 @@ DEFAULT_HAZARD_RADIUS = {
     "construction_barricade": 1.2,
     "parked_vehicle": 2.0,
     "pedestrian": 1.0,
+    "human_crossing": 1.0,
+    "bike_ahead": 1.5,
+    "sudden_stopping_car": 2.0,
+    "uneven_road": 1.0,
+    "no_road": 3.5,
 }
 
 
@@ -195,6 +205,18 @@ def scenario_hazard_to_road_hazard(
         distance=position[0],
         position=position,
         radius=radius,
+        metadata={
+            key: value
+            for key, value in hazard.items()
+            if key not in {
+                "id",
+                "type",
+                "location",
+                "distance_ahead",
+                "lateral_offset",
+                "active",
+            }
+        },
     )
 
 

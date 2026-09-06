@@ -71,6 +71,12 @@ class Dashboard:
             []
         ) or []
 
+        hazards = self._get(
+            perception_output,
+            "hazards",
+            []
+        ) or []
+
 
         if camera_frame is not None:
             ax.imshow(camera_frame)
@@ -151,9 +157,36 @@ class Dashboard:
                 )
             )
 
+        hazard_labels = []
+        for hazard in hazards:
+            hazard_type = self._get(
+                hazard,
+                "hazard_type",
+                "road_hazard",
+            )
+            distance = self._get(hazard, "distance", None)
+            if distance is None:
+                hazard_labels.append(str(hazard_type))
+            else:
+                hazard_labels.append(
+                    f"{hazard_type} {float(distance):.1f}m"
+                )
+
+        if hazard_labels:
+            ax.text(
+                0.02,
+                0.05,
+                "Hazards: " + ", ".join(hazard_labels),
+                transform=ax.transAxes,
+                verticalalignment="bottom",
+                color="red",
+                bbox=dict(alpha=0.7),
+            )
+
 
         ax.set_title(
-            f"M2 Perception\nObjects: {len(objects)}"
+            f"M2 Perception\nObjects: {len(objects)} "
+            f"Hazards: {len(hazards)}"
         )
 
 

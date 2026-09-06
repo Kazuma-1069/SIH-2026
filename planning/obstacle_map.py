@@ -186,6 +186,9 @@ class ObstacleMap:
                     "vehicle_relative",
                     False
                 )
+                grid_position = obj.get(
+                    "grid_position"
+                )
 
             else:
                 position = getattr(
@@ -208,12 +211,27 @@ class ObstacleMap:
                     "vehicle_relative",
                     False
                 )
+                grid_position = getattr(
+                    obj,
+                    "grid_position",
+                    None
+                )
 
+            map_position = (
+                grid_position
+                if grid_position is not None
+                else position
+            )
+
+            # Directly add obstacle preserving its coordinate system flag.
             self.add_obstacle(
-                position,
+                map_position,
                 radius,
                 obstacle_type=obstacle_type,
-                vehicle_relative=vehicle_relative,
+                vehicle_relative=(
+                    vehicle_relative
+                    and grid_position is None
+                ),
             )
 
     # =====================================================

@@ -50,6 +50,9 @@ class ObjectTracker:
             "confidence": detection["confidence"],
             "bbox": bbox,
             "centroid": self._centroid(bbox),
+            "velocity": [0.0, 0.0],
+            "predicted_position": list(self._centroid(bbox)),
+            "age": 1,
             "missing_frames": 0,
         }
 
@@ -131,10 +134,20 @@ class ObjectTracker:
 
             track = self.tracks[track_id]
 
+            previous_centroid = track["centroid"]
+            next_centroid = detection_centroids[detection_index]
+
             track["bbox"] = detection["bbox"]
-            track["centroid"] = self._centroid(
-                detection["bbox"]
-            )
+            track["centroid"] = next_centroid
+            track["velocity"] = [
+                next_centroid[0] - previous_centroid[0],
+                next_centroid[1] - previous_centroid[1],
+            ]
+            track["predicted_position"] = [
+                next_centroid[0] + track["velocity"][0] * 5.0,
+                next_centroid[1] + track["velocity"][1] * 5.0,
+            ]
+            track["age"] += 1
             track["confidence"] = detection["confidence"]
             track["class_id"] = detection["class_id"]
             track["class_name"] = detection["class_name"]

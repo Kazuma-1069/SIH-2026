@@ -55,6 +55,7 @@ class TelemetryExporter:
         simulation_output: Any = None,
         perception_output: Any = None,
         planning_output: Any = None,
+        control_output: Any = None,
         timestamp: float | None = None,
     ) -> Dict[str, Any]:
         """
@@ -121,6 +122,17 @@ class TelemetryExporter:
 
             record["object_count"] = len(
                 objects or []
+            )
+
+            record["prediction_count"] = len(
+                self._get(perception_output, "predictions", []) or []
+            )
+            record["risk_assessment_count"] = len(
+                self._get(
+                    perception_output,
+                    "risk_assessments",
+                    [],
+                ) or []
             )
 
             record["perception_source"] = self._get(
@@ -190,6 +202,34 @@ class TelemetryExporter:
             record["safety_reason"] = self._get(
                 planning_output,
                 "safety_reason",
+            )
+
+            record["replanned"] = self._get(
+                planning_output,
+                "replanned",
+                False,
+            )
+            record["replan_count"] = self._get(
+                planning_output,
+                "replan_count",
+                0,
+            )
+
+        if control_output is not None:
+            record["throttle"] = self._get(
+                control_output,
+                "throttle",
+                0.0,
+            )
+            record["steer"] = self._get(
+                control_output,
+                "steer",
+                self._get(control_output, "steering", 0.0),
+            )
+            record["brake"] = self._get(
+                control_output,
+                "brake",
+                0.0,
             )
 
         self.records.append(record)

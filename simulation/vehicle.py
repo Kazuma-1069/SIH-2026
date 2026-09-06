@@ -1,4 +1,5 @@
 import carla
+import importlib
 import math
 
 
@@ -443,6 +444,31 @@ class VehicleManager:
         """Generate a route by following CARLA road waypoints."""
 
         carla_map = self.world.get_map()
+
+        try:
+            route_planner_module = importlib.import_module(
+                "agents.navigation.global_route_planner"
+            )
+            GlobalRoutePlanner = (
+                route_planner_module.GlobalRoutePlanner
+            )
+
+            route_planner = GlobalRoutePlanner(
+                carla_map,
+                sampling_resolution=2.0,
+            )
+            traced_route = route_planner.trace_route(
+                start_location,
+                destination_location,
+            )
+            route_locations = [
+                waypoint.transform.location
+                for waypoint, _ in traced_route
+            ]
+            if route_locations:
+                return route_locations
+        except Exception as exc:
+            print(f"[M0] GlobalRoutePlanner unavailable: {exc}")
 
         current_waypoint = carla_map.get_waypoint(
             start_location

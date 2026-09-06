@@ -15,6 +15,9 @@ class PerceptionObject:
 
     distance: Optional[float] = None
     position: Optional[List[float]] = None
+    velocity: Optional[List[float]] = None
+    predicted_position: Optional[List[float]] = None
+    age: int = 0
 
     @property
     def center(self):
@@ -34,6 +37,7 @@ class RoadHazard:
     distance: Optional[float] = None
     position: Optional[List[float]] = None
     radius: Optional[float] = None
+    metadata: Optional[dict] = None
 
     @property
     def center(self):
@@ -61,6 +65,14 @@ class PerceptionOutput:
     )
 
     hazards: List[RoadHazard] = field(
+        default_factory=list
+    )
+
+    predictions: List[dict] = field(
+        default_factory=list
+    )
+
+    risk_assessments: List[dict] = field(
         default_factory=list
     )
 
@@ -97,6 +109,9 @@ class PerceptionOutput:
                     "distance": obj.distance,
                     "center": obj.center,
                     "position": obj.position,
+                    "velocity": obj.velocity,
+                    "predicted_position": obj.predicted_position,
+                    "age": obj.age,
                 }
                 for obj in self.objects
             ],
@@ -110,12 +125,15 @@ class PerceptionOutput:
                     "center": hazard.center,
                     "position": hazard.position,
                     "radius": hazard.radius,
+                    "metadata": hazard.metadata,
                 }
                 for hazard in self.hazards
             ],
 
             "road_edges": self.road_edges,
             "lidar_obstacles": self.lidar_obstacles,
+            "predictions": self.predictions,
+            "risk_assessments": self.risk_assessments,
 
             # Avoid converting a large numpy mask into JSON here.
             "has_drivable_mask": self.drivable_mask is not None,

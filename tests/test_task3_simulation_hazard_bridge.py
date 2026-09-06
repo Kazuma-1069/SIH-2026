@@ -22,6 +22,7 @@ from perception.perception_pipeline import PerceptionPipeline
 from planning.obstacle_map import ObstacleMap
 from planning.planner import Planner
 from simulation.controller import VehicleController
+from simulation.scenario_manager import ScenarioManager
 
 
 def _scenario_hazard(
@@ -379,6 +380,72 @@ def test_pipeline_supplements_yolo_with_simulation_hazards():
     )
     assert planning_output["hazard_count"] == 2
     assert control_command is not None
+
+
+def test_pipeline_preserves_bridged_metric_position_and_stops_on_blocked_route():
+    scenario_manager = FakeScenarioManager(
+        [_scenario_hazard("parked_vehicle", 35.0, 0.0)]
+    )
+    vehicle = FakeVehicle(location=(10.0, 0.0), yaw=0.0)
+    planner = Planner(width=20, height=20)
+    pipeline = IntegrationPipeline(
+        perception_pipeline=FakePerceptionPipeline(),
+        planner=planner,
+        controller=VehicleController(),
+        vehicle=vehicle,
+        scenario_manager=scenario_manager,
+    )
+    pipeline.road_waypoints = [
+        [10.0, 0.0],
+        [15.0, 0.0],
+        [20.0, 0.0],
+        [25.0, 0.0],
+        [30.0, 0.0],
+        [35.0, 0.0],
+    ]
+
+    perception, planning_output, control_command = pipeline.process_frame(
+        object()
+    )
+
+    assert perception.hazards[0].position == [25.0, 0.0]
+    assert planning_output["action"] == "STOP"
+    assert planning_output["safety_reason"] in {
+        "BUBBLE_SHIELD_EMERGENCY",
+        "NO_SAFE_ROAD_DETOUR",
+    }
+    assert control_command["throttle"] == 0.0
+    assert control_command["brake"] == 1.0
+
+
+def test_pothole_hazard_stays_active_without_visual_actor():
+    manager = ScenarioManager.__new__(ScenarioManager)
+    manager.actors = []
+    manager.hazards = []
+
+    transform = type(
+        "Transform",
+        (),
+        {"location": FakeLocation(34.0, 0.0)},
+    )()
+    manager._record_hazard(
+        "pothole",
+        actor=None,
+        transform=transform,
+        distance_ahead=24.0,
+        lateral_offset=0.0,
+        severity="medium",
+    )
+
+    assert manager.hazards[0]["active"] is True
+    bridged = bridge_scenario_hazards(
+        manager.hazards,
+        ego_x=10.0,
+        ego_y=0.0,
+        ego_yaw_deg=0.0,
+    )
+    assert len(bridged) == 1
+    assert bridged[0].hazard_type == "pothole"
 
 
 def test_simulation_hazard_replanning_reaches_planner():
