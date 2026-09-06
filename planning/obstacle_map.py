@@ -175,12 +175,13 @@ class ObstacleMap:
                     [0, 0]
                 )
                 radius = obj.get(
-                    "radius",
-                    2
+                    "radius"
                 )
+                if radius is None:
+                    radius = 1.0
                 obstacle_type = obj.get(
                     "class_name",
-                    obj.get("type", "unknown")
+                    obj.get("type", obj.get("hazard_type", "unknown"))
                 )
                 vehicle_relative = obj.get(
                     "vehicle_relative",
@@ -199,12 +200,14 @@ class ObstacleMap:
                 radius = getattr(
                     obj,
                     "radius",
-                    2
+                    1.0
                 )
+                if radius is None:
+                    radius = 1.0
                 obstacle_type = getattr(
                     obj,
                     "class_name",
-                    "unknown"
+                    getattr(obj, "hazard_type", "unknown")
                 )
                 vehicle_relative = getattr(
                     obj,
@@ -245,6 +248,13 @@ class ObstacleMap:
         obstacle_type="unknown",
         vehicle_relative=False,
     ):
+        if radius is None or radius < 0:
+            radius = 1.0
+        radius = float(radius)
+
+        if position is None or len(position) < 2:
+            return
+
         self.obstacles.append(
             {
                 "position": position,
@@ -343,9 +353,7 @@ class ObstacleMap:
                     ) ** 2
                 )
 
-            distance -= obstacle[
-                "radius"
-            ]
+            distance -= float(obstacle.get("radius") or 0.0)
 
 
             nearest = min(

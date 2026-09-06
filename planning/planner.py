@@ -57,17 +57,30 @@ class Planner:
 
     def _find_path(self, start, goal):
         """
-        Generate a path using A* with Dijkstra as fallback.
+        Generate a path using A* with Dijkstra as fallback,
+        preferring safe paths with bubble clearance around hazards.
 
         Returns:
             (path, algorithm)
         """
+        bubble_radius = getattr(self.bubble_shield, "radius", 2.0)
 
-        raw_path = self.astar.find_path(start, goal)
+        # First attempt: search for a safe path outside the safety bubble radius
+        raw_path = self.astar.find_path(start, goal, safety_distance=bubble_radius)
         algorithm = "A_STAR"
 
         if not raw_path:
-            raw_path = self.dijkstra.find_path(start, goal)
+            raw_path = self.dijkstra.find_path(start, goal, safety_distance=bubble_radius)
+            if raw_path:
+                algorithm = "DIJKSTRA"
+
+        # Second attempt: if no path with full clearance, search with raw occupancy
+        if not raw_path:
+            raw_path = self.astar.find_path(start, goal, safety_distance=0.0)
+            algorithm = "A_STAR"
+
+        if not raw_path:
+            raw_path = self.dijkstra.find_path(start, goal, safety_distance=0.0)
             algorithm = "DIJKSTRA"
 
         return raw_path, algorithm
@@ -179,13 +192,24 @@ class Planner:
 
         primary_objects = perception_data.get(
             "primary_objects",
-            []
+            perception_data.get("objects", [])
         )
+        if primary_objects is None:
+            primary_objects = []
 
         fallback_anomalies = perception_data.get(
             "fallback_anomalies",
+            perception_data.get("hazards", [])
+        )
+        if fallback_anomalies is None:
+            fallback_anomalies = []
+
+        lidar_obstacles = perception_data.get(
+            "lidar_obstacles",
             []
         )
+        if lidar_obstacles is None:
+            lidar_obstacles = []
 
         drivable_space = perception_data.get(
             "drivable_space",
@@ -203,7 +227,7 @@ class Planner:
         )
 
         # Combine all perceived hazards.
-        hazards = primary_objects + fallback_anomalies
+        hazards = primary_objects + fallback_anomalies + lidar_obstacles
 
         # Update the occupancy grid from perception.
         self.obstacle_map.update_from_objects(
@@ -369,46 +393,243 @@ class Planner:
                 "bubble_reason": bubble_result["reason"],
             }
 
-        # The current stack has no drivable-road mask for local replanning.
-        # Do not send an unconstrained grid detour to the vehicle controller.
-        if current_path_blocked:
+        # Determine whether an active route has become unsafe or blocked.
+        current_path_bubble_unsafe = False
+        current_path_bubble_result = {"safe": True}
+        if self.current_path:
+            current_path_bubble_result = self.bubble_shield.check_path(
+                self.current_path
+            )
+            if not current_path_bubble_result.get("safe", True):
+                current_path_bubble_unsafe = True
+
+        current_path_unsafe = (
+            current_path_blocked or current_path_bubble_unsafe
+        )
+
+        if current_path_unsafe:
             candidate_path, algorithm = self._find_path(
                 start,
                 goal,
             )
-            self.current_path = []
-            self.replan_count += 1
+
+            # Check if dynamic detour is authorized / validated.
+            detour_allowed = bool(
+                perception_data.get("allow_local_detour")
+                or perception_data.get("allow_detour")
+                or perception_data.get("safe_detour_allowed")
+                or drivable_space.get("allow_detour")
+                or drivable_space.get("allow_local_detour")
+                or drivable_space.get("safe_detour")
+                or drivable_space.get("drivable_corridor")
+                or drivable_space.get("drivable_mask")
+                or drivable_space.get("road_corridor")
+            )
 
             if not candidate_path:
-                return {
+                self.current_path = []
+                self.replan_count += 1
+                if current_path_blocked:
+                    stop_reason = "NO_PATH_FOUND"
+                    algo = algorithm
+                elif not bubble_result["safe"]:
+                    stop_reason = bubble_result["reason"]
+                    algo = "BUBBLE_SHIELD"
+                else:
+                    stop_reason = current_path_bubble_result.get("reason", "BUBBLE_SHIELD_PATH_BLOCKED")
+                    algo = "BUBBLE_SHIELD"
+
+                res = {
+                    "action": "STOP",
+                    "target_speed_mps": 0.0,
+                    "algorithm": algo,
+                    "hazard_count": len(hazards),
+                    "waypoints": [],
+                    "path_safe": False,
+                    "safety_reason": stop_reason,
+                    "confidence_uncertainty": confidence,
+                    "replanned": True,
+                    "current_path_blocked": current_path_blocked,
+                    "replan_count": self.replan_count,
+                    "destination": list(goal),
+                    "risk_assessments": risk_assessments,
+                    "bubble_safe": bubble_result["safe"],
+                    "bubble_emergency": bubble_result["emergency"],
+                    "bubble_distance": bubble_result["distance"],
+                    "bubble_reason": bubble_result["reason"],
+                    "bubble_path_safe": current_path_bubble_result.get("safe", True),
+                }
+                if has_tl:
+                    res["traffic_light_state"] = tl_state
+                return res
+
+            if not detour_allowed:
+                self.current_path = []
+                self.replan_count += 1
+                if current_path_blocked:
+                    stop_reason = "NO_SAFE_ROAD_DETOUR"
+                    algo = "SAFETY_STOP"
+                elif not bubble_result["safe"]:
+                    stop_reason = bubble_result["reason"]
+                    algo = "BUBBLE_SHIELD"
+                else:
+                    stop_reason = current_path_bubble_result.get("reason", "BUBBLE_SHIELD_PATH_BLOCKED")
+                    algo = "BUBBLE_SHIELD"
+
+                res = {
+                    "action": "STOP",
+                    "target_speed_mps": 0.0,
+                    "algorithm": algo,
+                    "hazard_count": len(hazards),
+                    "waypoints": [],
+                    "path_safe": False,
+                    "safety_reason": stop_reason,
+                    "confidence_uncertainty": confidence,
+                    "replanned": True,
+                    "current_path_blocked": current_path_blocked,
+                    "replan_count": self.replan_count,
+                    "destination": list(goal),
+                    "risk_assessments": risk_assessments,
+                    "bubble_safe": bubble_result["safe"],
+                    "bubble_emergency": bubble_result["emergency"],
+                    "bubble_distance": bubble_result["distance"],
+                    "bubble_reason": bubble_result["reason"],
+                    "bubble_path_safe": current_path_bubble_result.get("safe", True),
+                }
+                if has_tl:
+                    res["traffic_light_state"] = tl_state
+                return res
+
+            if "drivable_corridor" in drivable_space and isinstance(drivable_space["drivable_corridor"], (list, tuple)):
+                corridor_set = {tuple(p) for p in drivable_space["drivable_corridor"]}
+                if not all(tuple(p) in corridor_set for p in candidate_path):
+                    self.current_path = []
+                    self.replan_count += 1
+                    res = {
+                        "action": "STOP",
+                        "target_speed_mps": 0.0,
+                        "algorithm": "SAFETY_STOP",
+                        "hazard_count": len(hazards),
+                        "waypoints": [],
+                        "path_safe": False,
+                        "safety_reason": "NO_SAFE_ROAD_DETOUR",
+                        "confidence_uncertainty": confidence,
+                        "replanned": True,
+                        "current_path_blocked": current_path_blocked,
+                        "replan_count": self.replan_count,
+                        "destination": list(goal),
+                        "risk_assessments": risk_assessments,
+                        "bubble_safe": bubble_result["safe"],
+                        "bubble_emergency": bubble_result["emergency"],
+                        "bubble_distance": bubble_result["distance"],
+                        "bubble_reason": bubble_result["reason"],
+                        "bubble_path_safe": current_path_bubble_result.get("safe", True),
+                    }
+                    if has_tl:
+                        res["traffic_light_state"] = tl_state
+                    return res
+
+            # Detour is allowed - prefer a safe local detour when one exists
+            optimized_candidate = self.optimizer.optimize(candidate_path)
+            candidate_bubble = self.bubble_shield.check_path(optimized_candidate)
+            selected_detour = optimized_candidate
+
+            if not candidate_bubble["safe"]:
+                # Check if raw candidate is safe in case optimizer cut corners
+                raw_bubble = self.bubble_shield.check_path(candidate_path)
+                if raw_bubble["safe"]:
+                    selected_detour = candidate_path
+                    candidate_bubble = raw_bubble
+                else:
+                    self.current_path = []
+                    self.replan_count += 1
+                    res = {
+                        "action": "STOP",
+                        "target_speed_mps": 0.0,
+                        "algorithm": algorithm,
+                        "hazard_count": len(hazards),
+                        "waypoints": [],
+                        "path_safe": False,
+                        "safety_reason": "BUBBLE_SHIELD_PATH_BLOCKED",
+                        "confidence_uncertainty": confidence,
+                        "replanned": True,
+                        "current_path_blocked": current_path_blocked,
+                        "replan_count": self.replan_count,
+                        "destination": list(goal),
+                        "risk_assessments": risk_assessments,
+                        "bubble_safe": bubble_result["safe"],
+                        "bubble_emergency": bubble_result["emergency"],
+                        "bubble_distance": bubble_result["distance"],
+                        "bubble_reason": bubble_result["reason"],
+                        "bubble_path_safe": False,
+                    }
+                    if has_tl:
+                        res["traffic_light_state"] = tl_state
+                    return res
+
+            safety_result = self.safety_checker.validate_path(selected_detour)
+            if not safety_result["safe"]:
+                self.current_path = []
+                self.replan_count += 1
+                res = {
                     "action": "STOP",
                     "target_speed_mps": 0.0,
                     "algorithm": algorithm,
                     "hazard_count": len(hazards),
                     "waypoints": [],
                     "path_safe": False,
-                    "safety_reason": "NO_PATH_FOUND",
+                    "safety_reason": safety_result["reason"],
                     "confidence_uncertainty": confidence,
                     "replanned": True,
-                    "current_path_blocked": True,
+                    "current_path_blocked": current_path_blocked,
                     "replan_count": self.replan_count,
                     "destination": list(goal),
+                    "risk_assessments": risk_assessments,
+                    "bubble_safe": bubble_result["safe"],
+                    "bubble_emergency": bubble_result["emergency"],
+                    "bubble_distance": bubble_result["distance"],
+                    "bubble_reason": bubble_result["reason"],
+                    "bubble_path_safe": candidate_bubble.get("safe", True),
                 }
+                if has_tl:
+                    res["traffic_light_state"] = tl_state
+                return res
 
-            return {
-                "action": "STOP",
-                "target_speed_mps": 0.0,
-                "algorithm": "SAFETY_STOP",
+            # Safe local detour exists and is validated!
+            selected_detour = [list(pt) for pt in selected_detour]
+            self.current_path = selected_detour
+            self.replan_count += 1
+
+            detour_action = "REROUTE"
+            detour_speed = self.reduced_speed_mps
+            if has_tl and tl_state == "YELLOW":
+                detour_action = "SLOW"
+                detour_speed = self.reduced_speed_mps
+
+            res = {
+                "action": detour_action,
+                "target_speed_mps": detour_speed,
+                "algorithm": algorithm,
                 "hazard_count": len(hazards),
-                "waypoints": [],
-                "path_safe": False,
-                "safety_reason": "NO_SAFE_ROAD_DETOUR",
+                "hazards": hazards,
+                "waypoints": selected_detour,
+                "path_safe": True,
+                "safety_reason": "PATH_CLEAR",
                 "confidence_uncertainty": confidence,
+                "risk_assessments": risk_assessments,
                 "replanned": True,
-                "current_path_blocked": True,
+                "current_path_blocked": current_path_blocked,
                 "replan_count": self.replan_count,
                 "destination": list(goal),
+                "bubble_safe": bubble_result["safe"],
+                "bubble_emergency": bubble_result["emergency"],
+                "bubble_distance": bubble_result["distance"],
+                "bubble_reason": bubble_result["reason"],
+                "bubble_path_safe": candidate_bubble.get("safe", True),
             }
+            if has_tl:
+                res["traffic_light_state"] = tl_state
+            return res
 
         # A fresh hazard with no active path also requires
         # obstacle-aware planning.
@@ -469,20 +690,25 @@ class Planner:
             )
 
             if not bubble_path_result["safe"]:
-                return {
-                    "action": "STOP",
-                    "target_speed_mps": 0.0,
-                    "algorithm": algorithm,
-                    "hazard_count": len(hazards),
-                    "waypoints": [],
-                    "path_safe": False,
-                    "safety_reason": "BUBBLE_SHIELD_PATH_BLOCKED",
-                    "confidence_uncertainty": confidence,
-                    "replanned": True,
-                    "current_path_blocked": current_path_blocked,
-                    "replan_count": self.replan_count,
-                    "destination": list(goal)
-                }
+                raw_bubble = self.bubble_shield.check_path(raw_path)
+                if raw_bubble["safe"]:
+                    optimized_path = raw_path
+                    bubble_path_result = raw_bubble
+                else:
+                    return {
+                        "action": "STOP",
+                        "target_speed_mps": 0.0,
+                        "algorithm": algorithm,
+                        "hazard_count": len(hazards),
+                        "waypoints": [],
+                        "path_safe": False,
+                        "safety_reason": "BUBBLE_SHIELD_PATH_BLOCKED",
+                        "confidence_uncertainty": confidence,
+                        "replanned": True,
+                        "current_path_blocked": current_path_blocked,
+                        "replan_count": self.replan_count,
+                        "destination": list(goal)
+                    }
 
             # Validate the complete candidate path.
             safety_result = (
@@ -529,9 +755,38 @@ class Planner:
                     optimized_path
                 )
             )
+            bubble_path_result = self.bubble_shield.check_path(
+                optimized_path
+            )
+
+        # Determine whether path is safe considering both occupancy and Bubble Shield.
+        # If an obstacle is inside the configured safety bubble (around ego or path),
+        # the planner must treat the path as unsafe.
+        if "bubble_path_result" not in locals():
+            bubble_path_result = {
+                "safe": True
+            }
+
+        bubble_clear = (
+            bubble_result["safe"]
+            and bubble_path_result.get("safe", True)
+            and bubble_path_result.get("path_safe", True)
+        )
+        path_is_safe = safety_result["safe"] and bubble_clear
+
+        safety_reason = safety_result["reason"]
+        if not bubble_result["safe"]:
+            safety_reason = bubble_result["reason"]
+        elif not bubble_path_result.get("safe", True):
+            safety_reason = bubble_path_result.get("reason", "BUBBLE_SHIELD_PATH_BLOCKED")
 
         # Determine vehicle behavior.
-        if has_tl and tl_state == "YELLOW":
+        if not path_is_safe:
+            action = "STOP"
+            target_speed = 0.0
+            optimized_path = []
+
+        elif has_tl and tl_state == "YELLOW":
             action = "SLOW"
             target_speed = self.reduced_speed_mps
 
@@ -547,19 +802,15 @@ class Planner:
             action = "PROCEED_FORWARD"
             target_speed = self.default_speed_mps
 
-        # Final M1 planning output.
-        if "bubble_path_result" not in locals():
-            bubble_path_result = {
-                "safe": True
-            }
         planning_output = {
             "action": action,
             "target_speed_mps": target_speed,
             "algorithm": algorithm,
             "hazard_count": len(hazards),
+            "hazards": hazards,
             "waypoints": optimized_path,
-            "path_safe": safety_result["safe"],
-            "safety_reason": safety_result["reason"],
+            "path_safe": path_is_safe,
+            "safety_reason": safety_reason,
             "confidence_uncertainty": confidence,
             "risk_assessments": risk_assessments,
 

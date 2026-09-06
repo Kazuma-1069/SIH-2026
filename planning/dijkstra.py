@@ -13,7 +13,7 @@ class DijkstraPlanner:
     def __init__(self, obstacle_map):
         self.obstacle_map = obstacle_map
 
-    def get_neighbors(self, node):
+    def get_neighbors(self, node, safety_distance=0.0, start=None, goal=None):
         """Return valid 4-directional neighboring cells."""
         x, y = node
 
@@ -24,15 +24,21 @@ class DijkstraPlanner:
             (x, y - 1),
         ]
 
-        return [
-            cell
-            for cell in candidates
-            if 0 <= cell[0] < self.obstacle_map.width
-            and 0 <= cell[1] < self.obstacle_map.height
-            and not self.obstacle_map.is_occupied(*cell)
-        ]
+        valid = []
+        for cell in candidates:
+            if not (0 <= cell[0] < self.obstacle_map.width and 0 <= cell[1] < self.obstacle_map.height):
+                continue
+            if self.obstacle_map.is_occupied(*cell):
+                continue
+            if safety_distance > 0:
+                if cell != goal and cell != start:
+                    if self.obstacle_map.distance_to_nearest_obstacle(cell) <= safety_distance:
+                        continue
+            valid.append(cell)
 
-    def find_path(self, start, goal):
+        return valid
+
+    def find_path(self, start, goal, safety_distance=0.0):
         """
         Find the shortest path from start to goal.
 
@@ -66,7 +72,7 @@ class DijkstraPlanner:
                     current
                 )
 
-            for neighbor in self.get_neighbors(current):
+            for neighbor in self.get_neighbors(current, safety_distance=safety_distance, start=start, goal=goal):
                 new_distance = current_distance + 1
 
                 if new_distance < distances.get(

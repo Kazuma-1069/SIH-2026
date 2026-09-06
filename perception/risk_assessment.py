@@ -58,7 +58,7 @@ class RiskAssessor:
                 float(predicted_center[0]) - float(image_width) / 2.0
             ) / max(float(image_width) / 2.0, 1.0)
 
-        class_name = str(obj.get("class_name", "unknown")).lower()
+        class_name = str(obj.get("class_name", obj.get("hazard_type", "unknown"))).lower()
         path_conflict = (
             abs(lateral_m) <= self.lane_half_width_m
             or abs(predicted_lateral_m) <= self.lane_half_width_m

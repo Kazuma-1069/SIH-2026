@@ -54,6 +54,8 @@ def pixel_to_vehicle_coords(
             "bus": 3.0,
             "motorcycle": 1.4,
             "bicycle": 1.2,
+            "bike": 1.2,
+            "unknown": 1.5,
             "traffic light": 2.5,
             "stop sign": 2.0,
             "pothole": 0.3,
