@@ -14,6 +14,7 @@ class PerceptionObject:
     bbox: List[int]
 
     distance: Optional[float] = None
+    position: Optional[List[float]] = None
 
     @property
     def center(self):
@@ -31,6 +32,7 @@ class RoadHazard:
     confidence: float
     bbox: List[int]
     distance: Optional[float] = None
+    position: Optional[List[float]] = None
 
     @property
     def center(self):
@@ -93,6 +95,7 @@ class PerceptionOutput:
                     "bbox": obj.bbox,
                     "distance": obj.distance,
                     "center": obj.center,
+                    "position": obj.position,
                 }
                 for obj in self.objects
             ],
@@ -104,6 +107,7 @@ class PerceptionOutput:
                     "bbox": hazard.bbox,
                     "distance": hazard.distance,
                     "center": hazard.center,
+                    "position": hazard.position,
                 }
                 for hazard in self.hazards
             ],

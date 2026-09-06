@@ -11,12 +11,18 @@ sys.path.insert(
     )
 )
 from simulation.controller import VehicleController
-from integration.data_adapter import perception_to_planning_input
-from integration.pipeline import IntegrationPipeline
+from integration.data_adapter import (
+    perception_to_planning_input,
+    pixel_to_vehicle_coords,
+)
 from interfaces.perception_output import (
     PerceptionOutput,
     PerceptionObject,
+    RoadHazard,
 )
+from planning.obstacle_map import ObstacleMap
+from planning.safety_checker import BubbleShield
+from integration.pipeline import IntegrationPipeline
 
 
 def test_perception_to_planning_input():
@@ -112,3 +118,117 @@ def test_integration_pipeline_m2_to_m1():
         [0, 0],
         [10, 10],
     ]
+
+
+def test_pixel_to_vehicle_coords_centered():
+    bbox = [540, 200, 740, 400]
+    coords = pixel_to_vehicle_coords(
+        bbox=bbox,
+        distance=10.0,
+        image_width=1280,
+        image_height=720,
+    )
+    assert coords[0] == 10.0
+    assert coords[1] == 0.0
+
+
+def test_pixel_to_vehicle_coords_lateral_offsets():
+    # Right-side object: u_center = 960 (640 + 320)
+    bbox_right = [860, 200, 1060, 400]
+    coords_right = pixel_to_vehicle_coords(
+        bbox=bbox_right,
+        distance=10.0,
+        image_width=1280,
+        image_height=720,
+    )
+    assert coords_right[0] == 10.0
+    assert coords_right[1] == 5.0
+
+    # Left-side object: u_center = 320 (640 - 320)
+    bbox_left = [220, 200, 420, 400]
+    coords_left = pixel_to_vehicle_coords(
+        bbox=bbox_left,
+        distance=10.0,
+        image_width=1280,
+        image_height=720,
+    )
+    assert coords_left[0] == 10.0
+    assert coords_left[1] == -5.0
+
+
+def test_perception_to_planning_input_converts_coordinates():
+    perception = PerceptionOutput(
+        frame_id=1,
+        image_width=1280,
+        image_height=720,
+        objects=[
+            PerceptionObject(
+                track_id=1,
+                class_id=2,
+                class_name="car",
+                confidence=0.95,
+                bbox=[540, 200, 740, 400],
+                distance=12.0,
+            )
+        ],
+        hazards=[
+            RoadHazard(
+                hazard_type="pothole",
+                confidence=0.88,
+                bbox=[220, 500, 420, 600],
+                distance=6.0,
+            )
+        ],
+    )
+
+    planning_input = perception_to_planning_input(perception)
+
+    assert len(planning_input["primary_objects"]) == 1
+    car_obj = planning_input["primary_objects"][0]
+    assert car_obj["vehicle_relative"] is True
+    assert car_obj["position"] == [12.0, 0.0]
+    assert car_obj["radius"] > 0
+
+    assert len(planning_input["fallback_anomalies"]) == 1
+    hazard_obj = planning_input["fallback_anomalies"][0]
+    assert hazard_obj["vehicle_relative"] is True
+    assert hazard_obj["position"][0] == 6.0
+    assert hazard_obj["position"][1] < 0.0
+
+
+def test_bubble_shield_with_vehicle_relative_obstacles():
+    obstacle_map = ObstacleMap(width=20, height=20)
+    bubble_shield = BubbleShield(
+        obstacle_map,
+        radius=2.0,
+        emergency_radius=1.0,
+    )
+
+    # Distant obstacle (15m ahead) -> should be safe
+    obstacle_map.update_from_objects(
+        [
+            {
+                "position": [15.0, 0.0],
+                "radius": 1.0,
+                "vehicle_relative": True,
+            }
+        ]
+    )
+    result_far = bubble_shield.check([0.0, 0.0])
+    assert result_far["safe"] is True
+    assert result_far["emergency"] is False
+
+    # Close obstacle (1.5m ahead, radius 1.0 -> boundary at 0.5m) -> emergency
+    obstacle_map.update_from_objects(
+        [
+            {
+                "position": [1.5, 0.0],
+                "radius": 1.0,
+                "vehicle_relative": True,
+            }
+        ]
+    )
+    result_near = bubble_shield.check([0.0, 0.0])
+    assert result_near["safe"] is False
+    assert result_near["emergency"] is True
+    assert result_near["reason"] == "EMERGENCY_BUBBLE_VIOLATION"

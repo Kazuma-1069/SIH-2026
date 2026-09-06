@@ -166,63 +166,73 @@ class ObstacleMap:
 
 
         for obj in objects:
-
-
             if isinstance(
                 obj,
                 dict
             ):
-
                 position = obj.get(
                     "position",
-                    [0,0]
+                    [0, 0]
                 )
-
-
                 radius = obj.get(
                     "radius",
                     2
                 )
-
+                obstacle_type = obj.get(
+                    "class_name",
+                    obj.get("type", "unknown")
+                )
+                vehicle_relative = obj.get(
+                    "vehicle_relative",
+                    False
+                )
 
             else:
-
                 position = getattr(
                     obj,
                     "position",
-                    [0,0]
+                    [0, 0]
                 )
-
-
-                radius = 2
-
-
+                radius = getattr(
+                    obj,
+                    "radius",
+                    2
+                )
+                obstacle_type = getattr(
+                    obj,
+                    "class_name",
+                    "unknown"
+                )
+                vehicle_relative = getattr(
+                    obj,
+                    "vehicle_relative",
+                    False
+                )
 
             self.add_obstacle(
                 position,
-                radius
+                radius,
+                obstacle_type=obstacle_type,
+                vehicle_relative=vehicle_relative,
             )
-
-
 
     # =====================================================
     # ADD OBSTACLE
     # =====================================================
 
-
     def add_obstacle(
         self,
         position,
         radius=2.0,
-        obstacle_type="unknown"
+        obstacle_type="unknown",
+        vehicle_relative=False,
     ):
-
-
         self.obstacles.append(
             {
                 "position": position,
                 "radius": radius,
-                "type": obstacle_type
+                "type": obstacle_type,
+                "vehicle_relative": vehicle_relative,
             }
         )
 
@@ -289,34 +299,31 @@ class ObstacleMap:
 
         nearest = float("inf")
 
-
-
         for obstacle in self.obstacles:
-
-
             position = obstacle[
                 "position"
             ]
 
-
-            distance = math.sqrt(
-
-                (
-                    ego_position[0]
-                    -
-                    position[0]
-                ) ** 2
-
-                +
-
-                (
-                    ego_position[1]
-                    -
-                    position[1]
-                ) ** 2
-
-            )
-
+            if obstacle.get("vehicle_relative", False) and (
+                ego_position[0] != 0 or ego_position[1] != 0
+            ):
+                distance = math.sqrt(
+                    position[0] ** 2 + position[1] ** 2
+                )
+            else:
+                distance = math.sqrt(
+                    (
+                        ego_position[0]
+                        -
+                        position[0]
+                    ) ** 2
+                    +
+                    (
+                        ego_position[1]
+                        -
+                        position[1]
+                    ) ** 2
+                )
 
             distance -= obstacle[
                 "radius"
