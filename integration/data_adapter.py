@@ -111,6 +111,18 @@ def perception_to_planning_input(
             [],
         )
 
+        traffic_light = getattr(perception_output, "traffic_light", None)
+        has_traffic_light = hasattr(perception_output, "traffic_light")
+        if not has_traffic_light:
+            if hasattr(perception_output, "traffic_light_state"):
+                traffic_light = getattr(perception_output, "traffic_light_state")
+                has_traffic_light = True
+            elif hasattr(perception_output, "environment") and isinstance(perception_output.environment, dict):
+                env = perception_output.environment
+                if "traffic_light" in env or "traffic_light_state" in env:
+                    traffic_light = env.get("traffic_light", env.get("traffic_light_state"))
+                    has_traffic_light = True
+
     elif isinstance(
         perception_output,
         dict
@@ -142,6 +154,20 @@ def perception_to_planning_input(
             "risk_assessments",
             [],
         )
+
+        traffic_light = None
+        has_traffic_light = False
+        if "traffic_light" in perception_output:
+            traffic_light = perception_output["traffic_light"]
+            has_traffic_light = True
+        elif "traffic_light_state" in perception_output:
+            traffic_light = perception_output["traffic_light_state"]
+            has_traffic_light = True
+        elif isinstance(perception_output.get("environment"), dict):
+            env = perception_output["environment"]
+            if "traffic_light" in env or "traffic_light_state" in env:
+                traffic_light = env.get("traffic_light", env.get("traffic_light_state"))
+                has_traffic_light = True
 
     else:
         raise TypeError(
@@ -323,11 +349,33 @@ def perception_to_planning_input(
             }
         )
 
+    # If not explicitly found, inspect objects for traffic light
+    if not has_traffic_light:
+        for obj in objects:
+            if isinstance(obj, dict):
+                cname = str(obj.get("class_name", "")).lower()
+                if cname in ("traffic light", "traffic_light", "traffic_signal"):
+                    has_traffic_light = True
+                    traffic_light = (
+                        obj.get("state")
+                        or (obj.get("metadata") or {}).get("state")
+                        or (obj.get("metadata") or {}).get("traffic_light_state")
+                    )
+                    break
+            else:
+                cname = str(getattr(obj, "class_name", "")).lower()
+                if cname in ("traffic light", "traffic_light", "traffic_signal"):
+                    has_traffic_light = True
+                    traffic_light = getattr(obj, "state", None)
+                    if traffic_light is None and hasattr(obj, "metadata") and isinstance(obj.metadata, dict):
+                        traffic_light = obj.metadata.get("state") or obj.metadata.get("traffic_light_state")
+                    break
+
     # ==========================
     # Output for M1
     # ==========================
 
-    return {
+    planning_input = {
         "primary_objects":
             primary_objects,
 
@@ -365,3 +413,9 @@ def perception_to_planning_input(
         "ego_position":
             [0.0, 0.0],
     }
+
+    if has_traffic_light:
+        planning_input["traffic_light"] = traffic_light
+        planning_input["traffic_light_state"] = traffic_light
+
+    return planning_input

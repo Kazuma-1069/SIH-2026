@@ -81,6 +81,77 @@ class Planner:
             self.current_path
         )
 
+    def _parse_traffic_light(self, perception_data):
+        """
+        Parse traffic light state from perception_data.
+
+        Returns:
+            (has_traffic_light: bool, state: Optional[str], stop_reason: Optional[str])
+        """
+        has_traffic_light = False
+        raw_state = None
+
+        if "traffic_light_state" in perception_data:
+            has_traffic_light = True
+            raw_state = perception_data["traffic_light_state"]
+        elif "traffic_light" in perception_data:
+            has_traffic_light = True
+            val = perception_data["traffic_light"]
+            if isinstance(val, dict):
+                raw_state = val.get("state", val.get("traffic_light_state"))
+            else:
+                raw_state = val
+        elif isinstance(perception_data.get("environment"), dict) and (
+            "traffic_light" in perception_data["environment"]
+            or "traffic_light_state" in perception_data["environment"]
+        ):
+            has_traffic_light = True
+            env = perception_data["environment"]
+            val = env.get("traffic_light_state", env.get("traffic_light"))
+            if isinstance(val, dict):
+                raw_state = val.get("state")
+            else:
+                raw_state = val
+        else:
+            for obj in (
+                perception_data.get("primary_objects", [])
+                + perception_data.get("fallback_anomalies", [])
+            ):
+                if isinstance(obj, dict):
+                    cname = str(obj.get("class_name", "")).lower()
+                    if cname in ("traffic light", "traffic_light", "traffic_signal"):
+                        has_traffic_light = True
+                        raw_state = (
+                            obj.get("state")
+                            or (obj.get("metadata") or {}).get("state")
+                            or (obj.get("metadata") or {}).get("traffic_light_state")
+                        )
+                        break
+
+        if not has_traffic_light:
+            return False, None, None
+
+        if raw_state is None:
+            return True, "MISSING", "TRAFFIC_LIGHT_MISSING"
+
+        if not isinstance(raw_state, str):
+            return True, "INVALID", "TRAFFIC_LIGHT_INVALID"
+
+        state_str = raw_state.strip().upper()
+        if not state_str:
+            return True, "MISSING", "TRAFFIC_LIGHT_MISSING"
+
+        if state_str in ("RED",):
+            return True, "RED", "TRAFFIC_LIGHT_RED"
+        elif state_str in ("YELLOW", "AMBER"):
+            return True, "YELLOW", None
+        elif state_str in ("GREEN",):
+            return True, "GREEN", None
+        elif state_str in ("UNKNOWN",):
+            return True, "UNKNOWN", "TRAFFIC_LIGHT_UNKNOWN"
+        else:
+            return True, "INVALID", "TRAFFIC_LIGHT_INVALID"
+
     def plan(self, perception_data):
         """
         Generate a safe path and high-level driving decision.
@@ -203,6 +274,34 @@ class Planner:
                 "destination": list(goal),
                 "bubble_safe": False,
                 "bubble_emergency": True,
+                "bubble_distance": bubble_result["distance"],
+                "bubble_reason": bubble_result["reason"],
+            }
+
+        # Traffic light decision logic: stop on RED, MISSING, UNKNOWN, or INVALID state
+        has_tl, tl_state, tl_stop_reason = self._parse_traffic_light(
+            perception_data
+        )
+
+        if has_tl and tl_stop_reason is not None:
+            self.current_path = []
+
+            return {
+                "action": "STOP",
+                "target_speed_mps": 0.0,
+                "algorithm": "TRAFFIC_LIGHT",
+                "hazard_count": len(hazards),
+                "waypoints": [],
+                "path_safe": False,
+                "safety_reason": tl_stop_reason,
+                "traffic_light_state": tl_state,
+                "confidence_uncertainty": confidence,
+                "replanned": False,
+                "current_path_blocked": current_path_blocked,
+                "replan_count": self.replan_count,
+                "destination": list(goal),
+                "bubble_safe": bubble_result["safe"],
+                "bubble_emergency": bubble_result["emergency"],
                 "bubble_distance": bubble_result["distance"],
                 "bubble_reason": bubble_result["reason"],
             }
@@ -432,7 +531,11 @@ class Planner:
             )
 
         # Determine vehicle behavior.
-        if current_path_blocked:
+        if has_tl and tl_state == "YELLOW":
+            action = "SLOW"
+            target_speed = self.reduced_speed_mps
+
+        elif current_path_blocked:
             action = "REROUTE"
             target_speed = self.reduced_speed_mps
 
@@ -449,7 +552,7 @@ class Planner:
             bubble_path_result = {
                 "safe": True
             }
-        return {
+        planning_output = {
             "action": action,
             "target_speed_mps": target_speed,
             "algorithm": algorithm,
@@ -475,3 +578,6 @@ class Planner:
             "bubble_reason": bubble_result["reason"],
             "bubble_path_safe": bubble_path_result["safe"],
         }
+        if has_tl:
+            planning_output["traffic_light_state"] = tl_state
+        return planning_output
