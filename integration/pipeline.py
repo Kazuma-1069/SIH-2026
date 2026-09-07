@@ -490,17 +490,31 @@ class IntegrationPipeline:
                     ] = dense_path
 
                     road_grid_cells = set()
-                    for pt in route:
-                        rgx = int((pt[0] - self.coordinate_adapter.origin[0]) / self.coordinate_adapter.scale)
-                        rgy = int((pt[1] - self.coordinate_adapter.origin[1]) / self.coordinate_adapter.scale)
+                    for cx, cy in dense_path:
                         for ddx in (-1, 0, 1):
                             for ddy in (-1, 0, 1):
-                                cgx = rgx + ddx
-                                cgy = rgy + ddy
+                                cgx = cx + ddx
+                                cgy = cy + ddy
                                 if 0 <= cgx < self.coordinate_adapter.grid_width and 0 <= cgy < self.coordinate_adapter.grid_height:
                                     cell_wx = self.coordinate_adapter.origin[0] + cgx * self.coordinate_adapter.scale
                                     cell_wy = self.coordinate_adapter.origin[1] + cgy * self.coordinate_adapter.scale
-                                    min_d = min(math.hypot(cell_wx - wp[0], cell_wy - wp[1]) for wp in route)
+                                    min_d = float("inf")
+                                    if len(route) >= 2:
+                                        for i in range(len(route) - 1):
+                                            a = route[i]
+                                            b = route[i + 1]
+                                            dx = b[0] - a[0]
+                                            dy = b[1] - a[1]
+                                            l2 = dx * dx + dy * dy
+                                            if l2 == 0:
+                                                d = math.hypot(cell_wx - a[0], cell_wy - a[1])
+                                            else:
+                                                t = max(0.0, min(1.0, ((cell_wx - a[0]) * dx + (cell_wy - a[1]) * dy) / l2))
+                                                d = math.hypot(cell_wx - (a[0] + t * dx), cell_wy - (a[1] + t * dy))
+                                            if d < min_d:
+                                                min_d = d
+                                    else:
+                                        min_d = min(math.hypot(cell_wx - wp[0], cell_wy - wp[1]) for wp in route)
                                     if min_d <= 5.5:
                                         road_grid_cells.add((cgx, cgy))
 

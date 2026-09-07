@@ -21,7 +21,7 @@ class AStarPlanner:
         """Manhattan distance heuristic."""
         return abs(a[0] - b[0]) + abs(a[1] - b[1])
 
-    def get_neighbors(self, node, safety_distance=0.0, start=None, goal=None):
+    def get_neighbors(self, node, safety_distance=0.0, start=None, goal=None, corridor=None):
         """Return valid 4-directional neighboring cells."""
         x, y = node
 
@@ -36,6 +36,8 @@ class AStarPlanner:
         for cell in candidates:
             if not (0 <= cell[0] < self.obstacle_map.width and 0 <= cell[1] < self.obstacle_map.height):
                 continue
+            if corridor is not None and cell not in corridor:
+                continue
             if self.obstacle_map.is_occupied(*cell):
                 continue
             if safety_distance > 0:
@@ -46,7 +48,7 @@ class AStarPlanner:
 
         return valid
 
-    def find_path(self, start, goal, safety_distance=0.0):
+    def find_path(self, start, goal, safety_distance=0.0, corridor=None):
         """
         Find a path from start to goal.
 
@@ -82,7 +84,7 @@ class AStarPlanner:
                     current
                 )
 
-            for neighbor in self.get_neighbors(current, safety_distance=safety_distance, start=start, goal=goal):
+            for neighbor in self.get_neighbors(current, safety_distance=safety_distance, start=start, goal=goal, corridor=corridor):
 
                 tentative_g = (
                     g_score[current] + 1

@@ -55,7 +55,7 @@ class Planner:
 
         return (int(point[0]), int(point[1]))
 
-    def _find_path(self, start, goal):
+    def _find_path(self, start, goal, corridor=None):
         """
         Generate a path using A* with Dijkstra as fallback,
         preferring safe paths with bubble clearance around hazards.
@@ -66,22 +66,23 @@ class Planner:
         bubble_radius = getattr(self.bubble_shield, "radius", 2.0)
 
         # First attempt: search for a safe path outside the safety bubble radius
-        raw_path = self.astar.find_path(start, goal, safety_distance=bubble_radius)
+        raw_path = self.astar.find_path(start, goal, safety_distance=bubble_radius, corridor=corridor)
         algorithm = "A_STAR"
 
         if not raw_path:
-            raw_path = self.dijkstra.find_path(start, goal, safety_distance=bubble_radius)
+            raw_path = self.dijkstra.find_path(start, goal, safety_distance=bubble_radius, corridor=corridor)
             if raw_path:
                 algorithm = "DIJKSTRA"
 
         # Second attempt: if no path with full clearance, search with raw occupancy
         if not raw_path:
-            raw_path = self.astar.find_path(start, goal, safety_distance=0.0)
+            raw_path = self.astar.find_path(start, goal, safety_distance=0.0, corridor=corridor)
             algorithm = "A_STAR"
 
         if not raw_path:
-            raw_path = self.dijkstra.find_path(start, goal, safety_distance=0.0)
-            algorithm = "DIJKSTRA"
+            raw_path = self.dijkstra.find_path(start, goal, safety_distance=0.0, corridor=corridor)
+            if raw_path:
+                algorithm = "DIJKSTRA"
 
         return raw_path, algorithm
 
@@ -411,11 +412,24 @@ class Planner:
             current_path_blocked or current_path_bubble_unsafe
         )
 
+        corridor_set = None
+        if "drivable_corridor" in drivable_space and isinstance(drivable_space["drivable_corridor"], (list, tuple)):
+            corridor_set = {tuple(p) for p in drivable_space["drivable_corridor"]}
+
         if current_path_unsafe:
-            candidate_path, algorithm = self._find_path(
-                start,
-                goal,
-            )
+            candidate_path = []
+            algorithm = "A_STAR"
+            if corridor_set:
+                candidate_path, algorithm = self._find_path(
+                    start,
+                    goal,
+                    corridor=corridor_set,
+                )
+            if not candidate_path:
+                candidate_path, algorithm = self._find_path(
+                    start,
+                    goal,
+                )
 
             # Check if dynamic detour is authorized / validated.
             detour_allowed = bool(
@@ -657,10 +671,19 @@ class Planner:
         # For a blocked current route, this creates a new
         # route around the updated obstacle map.
         if replanning_required or not self.current_path:
-            raw_path, algorithm = self._find_path(
-                start,
-                goal
-            )
+            raw_path = []
+            algorithm = "A_STAR"
+            if corridor_set:
+                raw_path, algorithm = self._find_path(
+                    start,
+                    goal,
+                    corridor=corridor_set,
+                )
+            if not raw_path:
+                raw_path, algorithm = self._find_path(
+                    start,
+                    goal,
+                )
 
             if not raw_path:
                 self.current_path = []
