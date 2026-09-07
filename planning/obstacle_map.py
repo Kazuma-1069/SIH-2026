@@ -228,13 +228,11 @@ class ObstacleMap:
 
             # Directly add obstacle preserving its coordinate system flag.
             self.add_obstacle(
-                map_position,
+                position,
                 radius,
                 obstacle_type=obstacle_type,
-                vehicle_relative=(
-                    vehicle_relative
-                    and grid_position is None
-                ),
+                vehicle_relative=vehicle_relative,
+                grid_position=map_position,
             )
 
     # =====================================================
@@ -247,6 +245,7 @@ class ObstacleMap:
         radius=2.0,
         obstacle_type="unknown",
         vehicle_relative=False,
+        grid_position=None,
     ):
         if radius is None or radius < 0:
             radius = 1.0
@@ -255,47 +254,47 @@ class ObstacleMap:
         if position is None or len(position) < 2:
             return
 
+        grid_pos = grid_position if grid_position is not None else position
+
         self.obstacles.append(
             {
                 "position": position,
+                "grid_position": grid_pos,
                 "radius": radius,
                 "type": obstacle_type,
                 "vehicle_relative": vehicle_relative,
             }
         )
 
-
-
         cx = int(
-            position[0]
+            grid_pos[0]
         )
 
         cy = int(
-            position[1]
+            grid_pos[1]
         )
 
+        cell_radius = max(0, int(round(radius / 5.0))) if vehicle_relative else int(radius)
 
         for dx in range(
-            -int(radius),
-            int(radius)+1
+            -cell_radius,
+            cell_radius + 1
         ):
 
             for dy in range(
-                -int(radius),
-                int(radius)+1
+                -cell_radius,
+                cell_radius + 1
             ):
 
                 if (
                     dx*dx + dy*dy
-                    <= radius*radius
+                    <= cell_radius*cell_radius
                 ):
 
                     self.set_obstacle(
                         cx + dx,
                         cy + dy
                     )
-
-
 
     def update(
         self,
@@ -306,24 +305,19 @@ class ObstacleMap:
             obstacles
         )
 
-
-
     # =====================================================
     # BUBBLE SHIELD
     # =====================================================
 
-
     def distance_to_nearest_obstacle(
         self,
-        ego_position
+        ego_position,
+        is_ego=True,
     ):
-
 
         if not self.obstacles:
 
             return float("inf")
-
-
 
         nearest = float("inf")
 
@@ -332,36 +326,32 @@ class ObstacleMap:
                 "position"
             ]
 
-            if obstacle.get("vehicle_relative", False) and (
-                ego_position[0] != 0 or ego_position[1] != 0
-            ):
+            if obstacle.get("vehicle_relative", False) and is_ego:
                 distance = math.sqrt(
                     position[0] ** 2 + position[1] ** 2
                 )
             else:
+                pos = obstacle.get("grid_position", position)
                 distance = math.sqrt(
                     (
                         ego_position[0]
                         -
-                        position[0]
+                        pos[0]
                     ) ** 2
                     +
                     (
                         ego_position[1]
                         -
-                        position[1]
+                        pos[1]
                     ) ** 2
                 )
 
             distance -= float(obstacle.get("radius") or 0.0)
 
-
             nearest = min(
                 nearest,
                 distance
             )
-
-
 
         return max(
             nearest,

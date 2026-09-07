@@ -371,19 +371,32 @@ class IntegrationPipeline:
                     ]
 
                     # Anchor origin so ego vehicle is represented inside the grid
-                    # rather than clamped to [0, 0] when driving in negative world directions.
-                    pts_x = [location.x] + [p[0] for p in self.road_waypoints[:20]]
-                    pts_y = [location.y] + [p[1] for p in self.road_waypoints[:20]]
+                    # with adequate forward, lateral, and rear margin rather than
+                    # clamped to boundaries when driving in negative world directions.
                     yaw_deg = vehicle_heading if vehicle_heading is not None else 0.0
                     yaw_rad = math.radians(yaw_deg)
-                    pts_x.append(location.x + 35.0 * math.cos(yaw_rad))
-                    pts_y.append(location.y + 35.0 * math.sin(yaw_rad))
+                    forward_x = math.cos(yaw_rad)
+                    forward_y = math.sin(yaw_rad)
+                    right_x = -math.sin(yaw_rad)
+                    right_y = math.cos(yaw_rad)
 
-                    min_x = min(pts_x)
-                    min_y = min(pts_y)
+                    pts_x = [location.x] + [p[0] for p in self.road_waypoints[:20]]
+                    pts_y = [location.y] + [p[1] for p in self.road_waypoints[:20]]
+                    pts_x.extend([
+                        location.x + 35.0 * forward_x,
+                        location.x - 15.0 * forward_x,
+                        location.x - 25.0 * right_x,
+                        location.x + 25.0 * right_x,
+                    ])
+                    pts_y.extend([
+                        location.y + 35.0 * forward_y,
+                        location.y - 15.0 * forward_y,
+                        location.y - 20.0 * right_y,
+                        location.y + 20.0 * right_y,
+                    ])
 
-                    origin_x = min_x if min_x < location.x else location.x
-                    origin_y = min_y if min_y < location.y else location.y
+                    origin_x = min(pts_x)
+                    origin_y = min(pts_y)
 
                     self.coordinate_adapter.set_origin(
                         [
@@ -422,14 +435,81 @@ class IntegrationPipeline:
                         "route_waypoints"
                     ] = route
 
-                    planning_input[
-                        "current_path"
-                    ] = [
+                    start_idx = 0
+                    if location is not None and route:
+                        min_dist_sq = float("inf")
+                        for idx, pt in enumerate(route):
+                            d_sq = (pt[0] - location.x) ** 2 + (pt[1] - location.y) ** 2
+                            if d_sq < min_dist_sq:
+                                min_dist_sq = d_sq
+                                start_idx = idx
+
+                    active_route = route[start_idx:] if start_idx < len(route) else route
+
+                    local_route = []
+                    accum_dist = 0.0
+                    prev_pt = [location.x, location.y] if location is not None else None
+                    for point in active_route:
+                        gx = (point[0] - self.coordinate_adapter.origin[0]) / self.coordinate_adapter.scale
+                        gy = (point[1] - self.coordinate_adapter.origin[1]) / self.coordinate_adapter.scale
+                        if 0 <= gx < self.coordinate_adapter.grid_width and 0 <= gy < self.coordinate_adapter.grid_height:
+                            local_route.append(point)
+                            if prev_pt is not None:
+                                accum_dist += math.hypot(point[0] - prev_pt[0], point[1] - prev_pt[1])
+                            prev_pt = point
+                            if accum_dist >= 20.0:
+                                break
+                        elif local_route:
+                            break
+
+                    raw_grid_points = [
                         self.coordinate_adapter
                         .world_to_grid(
                             point
-                        ) for point in route
+                        ) for point in (local_route or route)
                     ]
+                    dense_path = []
+                    for p in raw_grid_points:
+                        if not dense_path:
+                            dense_path.append(list(p))
+                        else:
+                            p0 = dense_path[-1]
+                            dist = max(abs(p[0] - p0[0]), abs(p[1] - p0[1]))
+                            if dist <= 1:
+                                if list(p) != dense_path[-1]:
+                                    dense_path.append(list(p))
+                            else:
+                                for step in range(1, dist + 1):
+                                    ix = int(round(p0[0] + (p[0] - p0[0]) * step / dist))
+                                    iy = int(round(p0[1] + (p[1] - p0[1]) * step / dist))
+                                    if [ix, iy] != dense_path[-1]:
+                                        dense_path.append([ix, iy])
+
+                    planning_input[
+                        "current_path"
+                    ] = dense_path
+
+                    road_grid_cells = set()
+                    for pt in route:
+                        rgx = int((pt[0] - self.coordinate_adapter.origin[0]) / self.coordinate_adapter.scale)
+                        rgy = int((pt[1] - self.coordinate_adapter.origin[1]) / self.coordinate_adapter.scale)
+                        for ddx in (-1, 0, 1):
+                            for ddy in (-1, 0, 1):
+                                cgx = rgx + ddx
+                                cgy = rgy + ddy
+                                if 0 <= cgx < self.coordinate_adapter.grid_width and 0 <= cgy < self.coordinate_adapter.grid_height:
+                                    cell_wx = self.coordinate_adapter.origin[0] + cgx * self.coordinate_adapter.scale
+                                    cell_wy = self.coordinate_adapter.origin[1] + cgy * self.coordinate_adapter.scale
+                                    min_d = min(math.hypot(cell_wx - wp[0], cell_wy - wp[1]) for wp in route)
+                                    if min_d <= 5.5:
+                                        road_grid_cells.add((cgx, cgy))
+
+                    if "drivable_space" not in planning_input:
+                        planning_input["drivable_space"] = {}
+                    planning_input["drivable_space"]["drivable_corridor"] = [
+                        list(c) for c in road_grid_cells
+                    ]
+                    planning_input["drivable_space"]["allow_detour"] = True
 
                 planning_input[
                     "require_road_route"
@@ -459,18 +539,24 @@ class IntegrationPipeline:
         # Destination -> planner goal
 
         if self.destination is not None:
-
-            planning_input[
-                "goal"
-            ] = (
-                self.coordinate_adapter
-                .world_to_grid(
-                    [
-                        self.destination.x,
-                        self.destination.y,
-                    ]
+            dest_gx = (self.destination.x - self.coordinate_adapter.origin[0]) / self.coordinate_adapter.scale
+            dest_gy = (self.destination.y - self.coordinate_adapter.origin[1]) / self.coordinate_adapter.scale
+            if 0 <= dest_gx < self.coordinate_adapter.grid_width and 0 <= dest_gy < self.coordinate_adapter.grid_height:
+                planning_input["goal"] = [int(dest_gx), int(dest_gy)]
+            elif planning_input.get("current_path"):
+                planning_input["goal"] = list(planning_input["current_path"][-1])
+            else:
+                planning_input[
+                    "goal"
+                ] = (
+                    self.coordinate_adapter
+                    .world_to_grid(
+                        [
+                            self.destination.x,
+                            self.destination.y,
+                        ]
+                    )
                 )
-            )
 
         # ==========================
         # M0 DESTINATION CHECK
@@ -516,7 +602,7 @@ class IntegrationPipeline:
             following_global_route = (
                 planning_output.get("algorithm") == "CURRENT_PATH"
                 and not planning_output.get("replanned", False)
-                and planning_output.get("action") == "PROCEED_FORWARD"
+                and planning_output.get("action") in ("PROCEED_FORWARD", "SLOW_AND_REROUTE", "SLOW")
                 and self.road_waypoints
             )
 

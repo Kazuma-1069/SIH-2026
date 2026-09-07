@@ -254,6 +254,8 @@ class Planner:
         )
 
         start = ego_position
+        if 0 <= start[0] < self.obstacle_map.width and 0 <= start[1] < self.obstacle_map.height:
+            self.obstacle_map.set_obstacle(start[0], start[1], 0)
 
         if (
             perception_data.get("require_road_route", False)

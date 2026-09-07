@@ -32,6 +32,7 @@ sys.path.insert(
     )
 )
 import time
+import math
 import cv2
 
 carla_python_api = os.path.join(
@@ -430,8 +431,7 @@ def main():
 
 
         last_frame = None
-
-
+        initial_loc = vehicle_manager.get_location() if vehicle_manager else None
 
         while True:
 
@@ -527,9 +527,14 @@ def main():
                 print(f"[DEBUG] Goal: {planning_output.get('destination', [])}")
                 print(f"[DEBUG] Global route points: {len(pipeline.road_waypoints) if pipeline and pipeline.road_waypoints else 0}")
                 print(f"[DEBUG] Local waypoints: {len(planning_output.get('waypoints', []))}")
-                bike_haz = next((h for h in (planning_output.get('hazards') or []) if 'bike' in str(h.get('class_name', '')).lower() or 'bike' in str(h.get('hazard_type', '')).lower()), None)
-                bike_grid = bike_haz.get('grid_position') if bike_haz else None
-                bike_dist = bike_haz.get('distance') if bike_haz else None
+                bike_haz = None
+                for h in (planning_output.get('hazards') or perception_output.hazards or []):
+                    cname = h.get('class_name', h.get('hazard_type', '')) if isinstance(h, dict) else getattr(h, 'class_name', getattr(h, 'hazard_type', ''))
+                    if 'bike' in str(cname).lower():
+                        bike_haz = h
+                        break
+                bike_grid = bike_haz.get('grid_position') if isinstance(bike_haz, dict) else getattr(bike_haz, 'grid_position', None)
+                bike_dist = bike_haz.get('distance') if isinstance(bike_haz, dict) else getattr(bike_haz, 'distance', None)
                 ego_grid_pos = pipeline.coordinate_adapter.world_to_grid([ego_loc.x, ego_loc.y]) if ego_loc else None
                 print(f"[DEBUG] Ego grid position: {ego_grid_pos}")
                 print(f"[DEBUG] Bike grid position: {bike_grid}")
@@ -543,25 +548,27 @@ def main():
                 print(f"[DEBUG] M5 steer: {ctrl.get('steer', 0.0):.2f}")
                 print(f"[DEBUG] M5 brake: {ctrl.get('brake', 0.0):.2f}")
 
-            print(
-
-                f"\rFrame: {perception_output.frame_id} | "
-
-                f"Objects: {len(perception_output.objects)} | "
-
-                f"Hazards: {len(perception_output.hazards)} | "
-
-                f"Action: {planning_output['action']} | "
-
-                f"Speed: {planning_output['target_speed_mps']:.1f} m/s | "
-
-                f"Control: {control_command}",
-
-                end="",
-
-                flush=True,
-
-            )
+            if perception_output.frame_id % 5 == 0:
+                loc = vehicle_manager.get_location() if vehicle_manager else None
+                spd = vehicle_manager.get_speed() if vehicle_manager else 0.0
+                loc_txt = f"({loc.x:.1f}, {loc.y:.1f})" if loc else "(?, ?)"
+                print(
+                    f"\n[FRAME {perception_output.frame_id}] Loc: {loc_txt} | Spd: {spd:.1f} m/s | "
+                    f"Hazards: {len(perception_output.hazards)} | Action: {planning_output['action']} | "
+                    f"TgtSpd: {planning_output['target_speed_mps']:.1f} | Ctrl: {control_command}",
+                    flush=True,
+                )
+            else:
+                print(
+                    f"\rFrame: {perception_output.frame_id} | "
+                    f"Objects: {len(perception_output.objects)} | "
+                    f"Hazards: {len(perception_output.hazards)} | "
+                    f"Action: {planning_output['action']} | "
+                    f"Speed: {planning_output['target_speed_mps']:.1f} m/s | "
+                    f"Control: {control_command}",
+                    end="",
+                    flush=True,
+                )
 
 
 
@@ -650,8 +657,30 @@ def main():
 
                 break
 
+            if vehicle_manager and vehicle_manager.has_reached_destination():
+                final_loc = vehicle_manager.get_location() if vehicle_manager else None
+                final_spd = vehicle_manager.get_speed() if vehicle_manager else 0.0
+                dist_moved = 0.0
+                if initial_loc and final_loc:
+                    dist_moved = math.sqrt((final_loc.x - initial_loc.x)**2 + (final_loc.y - initial_loc.y)**2)
+                print(f"\n[SUMMARY] Initial location: ({initial_loc.x:.2f}, {initial_loc.y:.2f})")
+                print(f"[SUMMARY] Final location: ({final_loc.x:.2f}, {final_loc.y:.2f})")
+                print(f"[SUMMARY] Distance moved: {dist_moved:.2f} m")
+                print(f"[SUMMARY] Final speed: {final_spd:.2f} m/s")
+                print("\n[SUCCESS] Destination reached! Stopping.")
+                break
+
             max_frames = int(os.getenv("MAX_FRAMES", "0") or "0")
             if max_frames > 0 and perception_output.frame_id >= max_frames:
+                final_loc = vehicle_manager.get_location() if vehicle_manager else None
+                final_spd = vehicle_manager.get_speed() if vehicle_manager else 0.0
+                dist_moved = 0.0
+                if initial_loc and final_loc:
+                    dist_moved = math.sqrt((final_loc.x - initial_loc.x)**2 + (final_loc.y - initial_loc.y)**2)
+                print(f"\n[SUMMARY] Initial location: ({initial_loc.x:.2f}, {initial_loc.y:.2f})")
+                print(f"[SUMMARY] Final location: ({final_loc.x:.2f}, {final_loc.y:.2f})")
+                print(f"[SUMMARY] Distance moved: {dist_moved:.2f} m")
+                print(f"[SUMMARY] Final speed: {final_spd:.2f} m/s")
                 print(f"\nReached MAX_FRAMES ({max_frames}). Stopping.")
                 break
 
