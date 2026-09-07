@@ -182,6 +182,10 @@ def create_system():
 
 
 
+    vehicle_manager.set_destination(
+        destination_transform.location
+    )
+
     # ==========================
     # SPAWN VEHICLE
     # ==========================
@@ -189,13 +193,9 @@ def create_system():
     vehicle = (
         vehicle_manager
         .spawn_ego_vehicle(
-            transform=start_transform
+            transform=start_transform,
+            destination=destination_transform.location,
         )
-    )
-
-
-    vehicle_manager.set_destination(
-        destination_transform.location
     )
 
     scenario_name = os.getenv("M4_SCENARIO")
@@ -663,12 +663,13 @@ def main():
                 dist_moved = 0.0
                 if initial_loc and final_loc:
                     dist_moved = math.sqrt((final_loc.x - initial_loc.x)**2 + (final_loc.y - initial_loc.y)**2)
-                print(f"\n[SUMMARY] Initial location: ({initial_loc.x:.2f}, {initial_loc.y:.2f})")
-                print(f"[SUMMARY] Final location: ({final_loc.x:.2f}, {final_loc.y:.2f})")
-                print(f"[SUMMARY] Distance moved: {dist_moved:.2f} m")
-                print(f"[SUMMARY] Final speed: {final_spd:.2f} m/s")
-                print("\n[SUCCESS] Destination reached! Stopping.")
-                break
+                if dist_moved >= 3.0:
+                    print(f"\n[SUMMARY] Initial location: ({initial_loc.x:.2f}, {initial_loc.y:.2f})")
+                    print(f"[SUMMARY] Final location: ({final_loc.x:.2f}, {final_loc.y:.2f})")
+                    print(f"[SUMMARY] Distance moved: {dist_moved:.2f} m")
+                    print(f"[SUMMARY] Final speed: {final_spd:.2f} m/s")
+                    print("\n[SUCCESS] Destination reached! Stopping.")
+                    break
 
             max_frames = int(os.getenv("MAX_FRAMES", "0") or "0")
             if max_frames > 0 and perception_output.frame_id >= max_frames:

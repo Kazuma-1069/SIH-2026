@@ -29,11 +29,33 @@ class DestinationManager:
 
 
     def set_destination(self, index):
+        import math
 
-        self.destination_point = (
-            self.spawn_points[index]
-        )
+        candidate = self.spawn_points[index]
+        if self.start_point is not None:
+            s_loc = self.start_point.location
+            c_loc = candidate.location
+            dist = math.sqrt(
+                (c_loc.x - s_loc.x) ** 2
+                + (c_loc.y - s_loc.y) ** 2
+                + (c_loc.z - s_loc.z) ** 2
+            )
+            if dist < 15.0:
+                print(
+                    f"[DestinationManager] Warning: destination index {index} is too close ({dist:.1f}m) to start. "
+                    "Selecting an alternative distant spawn point."
+                )
+                for alt_idx, sp in enumerate(self.spawn_points):
+                    alt_dist = math.sqrt(
+                        (sp.location.x - s_loc.x) ** 2
+                        + (sp.location.y - s_loc.y) ** 2
+                        + (sp.location.z - s_loc.z) ** 2
+                    )
+                    if alt_dist >= 50.0:
+                        candidate = sp
+                        break
 
+        self.destination_point = candidate
         return self.destination_point
 
 

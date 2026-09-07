@@ -627,6 +627,12 @@ class IntegrationPipeline:
                     self.coordinate_adapter.grid_to_world(point)
                     for point in planner_waypoints
                 ]
+        elif (
+            self.vehicle is not None
+            and self.road_waypoints
+            and planning_output.get("action") not in ("STOP",)
+        ):
+            planning_output["waypoints"] = list(self.road_waypoints)
 
         print(
             "\n========== PLANNER DEBUG =========="

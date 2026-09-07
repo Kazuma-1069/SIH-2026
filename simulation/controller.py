@@ -227,23 +227,24 @@ class VehicleController:
             False
         )
 
+        target_speed = planning_output.get(
+            "target_speed_mps",
+            0.0
+        )
+
         safety_stop_required = (
             path_safe is False
             or bubble_safe is False
             or bubble_emergency
-            or bubble_path_safe is False
+            or (bubble_path_safe is False and action == "STOP")
+            or action == "STOP"
+            or target_speed <= 0.0
         )
 
 
         destination_reached = planning_output.get(
             "destination_reached",
             False,
-        )
-
-
-        target_speed = planning_output.get(
-            "target_speed_mps",
-            0.0
         )
 
 
@@ -282,10 +283,17 @@ class VehicleController:
             and action != "STOP"
             and not waypoints
         ):
+            if safety_stop_required or not path_safe or not bubble_safe or bubble_emergency or target_speed <= 0.0:
+                return {
+                    "throttle": 0.0,
+                    "steer": 0.0,
+                    "brake": 1.0,
+                }
+            throttle = min(max(target_speed / 10.0, 0.0), 0.7)
             return {
-                "throttle": 0.0,
+                "throttle": throttle,
                 "steer": 0.0,
-                "brake": 1.0,
+                "brake": 0.0,
             }
 
         if (
@@ -344,17 +352,11 @@ class VehicleController:
 
 
         if action == "STOP":
-
-            if not waypoints:
-                return {
-                    "throttle": 0.0,
-                    "steer": 0.0,
-                    "brake": 1.0,
-                }
-            target_speed = max(
-                target_speed,
-                2.0,
-            )
+            return {
+                "throttle": 0.0,
+                "steer": 0.0,
+                "brake": 1.0,
+            }
         # ==========================
 
         steer = 0.0

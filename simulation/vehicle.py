@@ -94,6 +94,7 @@ class VehicleManager:
         spawn_point=None,
         transform=None,
         role_name="hero",
+        destination=None,
     ):
         """
         Spawn the ego vehicle.
@@ -103,7 +104,11 @@ class VehicleManager:
             spawn_point
             transform
             role_name
+            destination
         """
+
+        if destination is not None:
+            self.set_destination(destination)
 
         if self.vehicle is not None:
 
@@ -192,6 +197,13 @@ class VehicleManager:
             )
 
             for point in spawn_points:
+                if self.destination is not None:
+                    dest_dist = math.hypot(
+                        point.location.x - self.destination.x,
+                        point.location.y - self.destination.y,
+                    )
+                    if dest_dist < 25.0:
+                        continue
 
                 point = carla.Transform(
                     carla.Location(
@@ -239,6 +251,14 @@ class VehicleManager:
         location = (
             self.vehicle.get_location()
         )
+
+        if self.destination is not None:
+            self._initial_location = (location.x, location.y, location.z)
+            self._initial_distance_to_dest = math.sqrt(
+                (location.x - self.destination.x) ** 2
+                + (location.y - self.destination.y) ** 2
+                + (location.z - self.destination.z) ** 2
+            )
 
         print(
             f"Ego vehicle spawned: "
@@ -356,6 +376,15 @@ class VehicleManager:
             )
 
         self.destination = destination
+
+        if self.vehicle is not None and self.is_alive():
+            loc = self.vehicle.get_location()
+            self._initial_location = (loc.x, loc.y, loc.z)
+            self._initial_distance_to_dest = math.sqrt(
+                (loc.x - destination.x) ** 2
+                + (loc.y - destination.y) ** 2
+                + (loc.z - destination.z) ** 2
+            )
 
         print(
             f"Destination set: "
@@ -635,7 +664,28 @@ class VehicleManager:
         if distance is None:
             return False
 
-        return distance <= threshold
+        if distance > threshold:
+            return False
+
+        if self.vehicle is not None and self.is_alive():
+            try:
+                curr_loc = self.vehicle.get_location()
+                init_loc = getattr(self, "_initial_location", None)
+                if init_loc is not None:
+                    dist_moved = math.hypot(
+                        curr_loc.x - init_loc[0],
+                        curr_loc.y - init_loc[1],
+                    )
+                    init_dist = getattr(self, "_initial_distance_to_dest", None)
+                    if init_dist is not None and init_dist > threshold:
+                        required_movement = min(3.0, init_dist * 0.3)
+                        return dist_moved >= required_movement
+                    else:
+                        return dist_moved >= threshold
+            except Exception:
+                pass
+
+        return True
 
     def destination_reached(
         self,
