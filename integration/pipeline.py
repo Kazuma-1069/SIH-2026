@@ -454,11 +454,6 @@ class IntegrationPipeline:
                         gy = (point[1] - self.coordinate_adapter.origin[1]) / self.coordinate_adapter.scale
                         if 0 <= gx < self.coordinate_adapter.grid_width and 0 <= gy < self.coordinate_adapter.grid_height:
                             local_route.append(point)
-                            if prev_pt is not None:
-                                accum_dist += math.hypot(point[0] - prev_pt[0], point[1] - prev_pt[1])
-                            prev_pt = point
-                            if accum_dist >= 20.0:
-                                break
                         elif local_route:
                             break
 
@@ -517,6 +512,11 @@ class IntegrationPipeline:
                                         min_d = min(math.hypot(cell_wx - wp[0], cell_wy - wp[1]) for wp in route)
                                     if min_d <= 5.5:
                                         road_grid_cells.add((cgx, cgy))
+
+                    if location is not None:
+                        ego_g = self.coordinate_adapter.world_to_grid([location.x, location.y])
+                        if 0 <= ego_g[0] < self.coordinate_adapter.grid_width and 0 <= ego_g[1] < self.coordinate_adapter.grid_height:
+                            road_grid_cells.add((int(ego_g[0]), int(ego_g[1])))
 
                     if "drivable_space" not in planning_input:
                         planning_input["drivable_space"] = {}

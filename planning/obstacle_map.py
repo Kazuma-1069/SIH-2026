@@ -332,7 +332,7 @@ class ObstacleMap:
                 )
             else:
                 pos = obstacle.get("grid_position", position)
-                distance = math.sqrt(
+                grid_dist = math.sqrt(
                     (
                         ego_position[0]
                         -
@@ -345,6 +345,8 @@ class ObstacleMap:
                         pos[1]
                     ) ** 2
                 )
+                scale = 5.0 if obstacle.get("vehicle_relative", False) else 1.0
+                distance = grid_dist * scale
 
             distance -= float(obstacle.get("radius") or 0.0)
 

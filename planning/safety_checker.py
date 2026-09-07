@@ -171,7 +171,7 @@ class BubbleShield:
 
             distance = (
                 self.obstacle_map
-                .distance_to_nearest_obstacle(point)
+                .distance_to_nearest_obstacle(point, is_ego=False)
             )
 
             minimum_distance = min(

@@ -415,6 +415,8 @@ class Planner:
         corridor_set = None
         if "drivable_corridor" in drivable_space and isinstance(drivable_space["drivable_corridor"], (list, tuple)):
             corridor_set = {tuple(p) for p in drivable_space["drivable_corridor"]}
+            corridor_set.add(tuple(start))
+            corridor_set.add(tuple(goal))
 
         if current_path_unsafe:
             candidate_path = []
@@ -519,7 +521,10 @@ class Planner:
                 return res
 
             if "drivable_corridor" in drivable_space and isinstance(drivable_space["drivable_corridor"], (list, tuple)):
-                corridor_set = {tuple(p) for p in drivable_space["drivable_corridor"]}
+                if not corridor_set:
+                    corridor_set = {tuple(p) for p in drivable_space["drivable_corridor"]}
+                    corridor_set.add(tuple(start))
+                    corridor_set.add(tuple(goal))
                 if not all(tuple(p) in corridor_set for p in candidate_path):
                     self.current_path = []
                     self.replan_count += 1
