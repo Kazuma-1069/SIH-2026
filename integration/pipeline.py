@@ -339,29 +339,8 @@ class IntegrationPipeline:
                     location.z,
                 )
 
-                ego_position = (
-                    self.coordinate_adapter
-                    .world_to_grid(
-                        [
-                            location.x,
-                            location.y,
-                        ]
-                    )
-                )
-
-                planning_input[
-                    "ego_position"
-                ] = ego_position
-
                 if self.road_waypoints is None:
                     route = []
-
-                    self.coordinate_adapter.set_origin(
-                        [
-                            location.x,
-                            location.y,
-                        ]
-                    )
 
                     if hasattr(
                         self.vehicle,
@@ -390,6 +369,42 @@ class IntegrationPipeline:
                         else list(point)
                         for point in route
                     ]
+
+                    # Anchor origin so ego vehicle is represented inside the grid
+                    # rather than clamped to [0, 0] when driving in negative world directions.
+                    pts_x = [location.x] + [p[0] for p in self.road_waypoints[:20]]
+                    pts_y = [location.y] + [p[1] for p in self.road_waypoints[:20]]
+                    yaw_deg = vehicle_heading if vehicle_heading is not None else 0.0
+                    yaw_rad = math.radians(yaw_deg)
+                    pts_x.append(location.x + 35.0 * math.cos(yaw_rad))
+                    pts_y.append(location.y + 35.0 * math.sin(yaw_rad))
+
+                    min_x = min(pts_x)
+                    min_y = min(pts_y)
+
+                    origin_x = min_x if min_x < location.x else location.x
+                    origin_y = min_y if min_y < location.y else location.y
+
+                    self.coordinate_adapter.set_origin(
+                        [
+                            origin_x,
+                            origin_y,
+                        ]
+                    )
+
+                ego_position = (
+                    self.coordinate_adapter
+                    .world_to_grid(
+                        [
+                            location.x,
+                            location.y,
+                        ]
+                    )
+                )
+
+                planning_input[
+                    "ego_position"
+                ] = ego_position
 
                 route = self.road_waypoints or []
 
@@ -427,6 +442,16 @@ class IntegrationPipeline:
 
 
 
+            # If ego vehicle is in CARLA and at an active traffic light, query its state
+            if hasattr(self.vehicle, "get_vehicle"):
+                carla_veh = self.vehicle.get_vehicle()
+                if carla_veh is not None and hasattr(carla_veh, "is_at_traffic_light") and carla_veh.is_at_traffic_light():
+                    tl_state = carla_veh.get_traffic_light_state()
+                    state_map = {0: "RED", 1: "YELLOW", 2: "GREEN"}
+                    tl_str = state_map.get(int(tl_state), "UNKNOWN")
+                    planning_input["traffic_light"] = tl_str
+                    planning_input["traffic_light_state"] = tl_str
+
         # Destination -> planner goal
 
         if self.destination is not None:
@@ -442,8 +467,6 @@ class IntegrationPipeline:
                     ]
                 )
             )
-
-
 
         # ==========================
         # M0 DESTINATION CHECK
@@ -659,6 +682,10 @@ class IntegrationPipeline:
         right_x = -math.sin(yaw_rad)
         right_y = math.cos(yaw_rad)
 
+        ego_grid = self.coordinate_adapter.world_to_grid(
+            [ego_location.x, ego_location.y]
+        )
+
         for collection_name in (
             "primary_objects",
             "fallback_anomalies",
@@ -676,8 +703,30 @@ class IntegrationPipeline:
                     + forward_distance * forward_y
                     + lateral_offset * right_y,
                 ]
-                obstacle["grid_position"] = (
+                grid_pos = (
                     self.coordinate_adapter.world_to_grid(
                         world_position
                     )
                 )
+                if forward_distance > 1.0 and grid_pos == ego_grid:
+                    step_cells = max(1, int(round(forward_distance / self.coordinate_adapter.scale)))
+                    step_x = int(round(step_cells * forward_x))
+                    step_y = int(round(step_cells * forward_y))
+                    if step_x == 0 and step_y == 0:
+                        step_x = 1 if forward_x >= 0.0 else -1
+                    cand_x = ego_grid[0] + step_x
+                    cand_y = ego_grid[1] + step_y
+                    grid_pos = [
+                        max(0, min(self.coordinate_adapter.grid_width - 1, cand_x)),
+                        max(0, min(self.coordinate_adapter.grid_height - 1, cand_y)),
+                    ]
+                    if grid_pos == ego_grid:
+                        if ego_grid[0] < self.coordinate_adapter.grid_width - 1:
+                            grid_pos[0] = ego_grid[0] + 1
+                        elif ego_grid[0] > 0:
+                            grid_pos[0] = ego_grid[0] - 1
+                        elif ego_grid[1] < self.coordinate_adapter.grid_height - 1:
+                            grid_pos[1] = ego_grid[1] + 1
+                        elif ego_grid[1] > 0:
+                            grid_pos[1] = ego_grid[1] - 1
+                obstacle["grid_position"] = grid_pos
