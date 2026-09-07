@@ -133,13 +133,15 @@ class Planner:
                 if isinstance(obj, dict):
                     cname = str(obj.get("class_name", "")).lower()
                     if cname in ("traffic light", "traffic_light", "traffic_signal"):
-                        has_traffic_light = True
-                        raw_state = (
+                        st = (
                             obj.get("state")
                             or (obj.get("metadata") or {}).get("state")
                             or (obj.get("metadata") or {}).get("traffic_light_state")
                         )
-                        break
+                        if st is not None:
+                            has_traffic_light = True
+                            raw_state = st
+                            break
 
         if not has_traffic_light:
             return False, None, None

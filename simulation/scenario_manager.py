@@ -701,7 +701,15 @@ class ScenarioManager:
         config = self._scenario_config("bike_ahead")
         self._spawn_actor_hazard(
             "bike_ahead",
-            ("vehicle.*motorcycle*", "vehicle.*bicycle*"),
+            (
+                "vehicle.*crossbike*",
+                "vehicle.*omafiets*",
+                "vehicle.*century*",
+                "vehicle.*ninja*",
+                "vehicle.*vespa*",
+                "vehicle.*yzf*",
+                "vehicle.*low_rider*",
+            ),
             config,
             "high",
             metadata={

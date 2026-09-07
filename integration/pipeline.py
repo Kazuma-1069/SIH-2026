@@ -406,6 +406,10 @@ class IntegrationPipeline:
                     "ego_position"
                 ] = ego_position
 
+                planning_input[
+                    "start"
+                ] = ego_position
+
                 route = self.road_waypoints or []
 
                 print(

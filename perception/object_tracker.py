@@ -169,9 +169,6 @@ class ObjectTracker:
         for track_id, track in self.tracks.items():
 
             if track_id not in matched_tracks:
-                if track["missing_frames"] == 0:
-                    continue
-
                 track["missing_frames"] += 1
 
         self._remove_old_tracks()

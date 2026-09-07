@@ -351,27 +351,31 @@ def perception_to_planning_input(
             }
         )
 
-    # If not explicitly found, inspect objects for traffic light
+    # If not explicitly found, inspect objects for traffic light with known state
     if not has_traffic_light:
         for obj in objects:
             if isinstance(obj, dict):
                 cname = str(obj.get("class_name", "")).lower()
                 if cname in ("traffic light", "traffic_light", "traffic_signal"):
-                    has_traffic_light = True
-                    traffic_light = (
+                    st = (
                         obj.get("state")
                         or (obj.get("metadata") or {}).get("state")
                         or (obj.get("metadata") or {}).get("traffic_light_state")
                     )
-                    break
+                    if st is not None:
+                        has_traffic_light = True
+                        traffic_light = st
+                        break
             else:
                 cname = str(getattr(obj, "class_name", "")).lower()
                 if cname in ("traffic light", "traffic_light", "traffic_signal"):
-                    has_traffic_light = True
-                    traffic_light = getattr(obj, "state", None)
-                    if traffic_light is None and hasattr(obj, "metadata") and isinstance(obj.metadata, dict):
-                        traffic_light = obj.metadata.get("state") or obj.metadata.get("traffic_light_state")
-                    break
+                    st = getattr(obj, "state", None)
+                    if st is None and hasattr(obj, "metadata") and isinstance(obj.metadata, dict):
+                        st = obj.metadata.get("state") or obj.metadata.get("traffic_light_state")
+                    if st is not None:
+                        has_traffic_light = True
+                        traffic_light = st
+                        break
 
     # ==========================
     # Output for M1
@@ -399,7 +403,13 @@ def perception_to_planning_input(
         "drivable_space":
             {
                 "obstacle_occupied_cells":
-                    0
+                    0,
+                "drivable_mask": (
+                    perception_output.get("has_drivable_mask")
+                    or perception_output.get("drivable_mask") is not None
+                    if isinstance(perception_output, dict)
+                    else (getattr(perception_output, "drivable_mask", None) is not None)
+                ),
             },
 
         "confidence_uncertainty":

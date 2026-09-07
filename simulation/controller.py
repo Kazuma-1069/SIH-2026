@@ -399,7 +399,7 @@ class VehicleController:
                 dy = waypoints[index][1] - vehicle_location[1]
                 is_ahead = (
                     vehicle_angle is None
-                    or dx * heading_x + dy * heading_y >= 0.0
+                    or dx * heading_x + dy * heading_y >= -self.waypoint_threshold
                 )
                 if is_ahead:
                     forward_indices.append(index)
